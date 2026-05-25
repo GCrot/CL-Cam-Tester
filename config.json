@@ -1,0 +1,52 @@
+{
+  "venc": {
+    "main": {
+      "enable": 1,
+      "format": "1920X1080P@60Hz",
+      "mode": "h264",
+      "profile": "MP",
+      "bitrate": 16384,
+      "rcmode": "cbr",
+      "interval": 5
+    },
+    "sub": {
+      "enable": 0,
+      "format": "1280X720P@30Hz",
+      "mode": "h264",
+      "profile": "MP",
+      "bitrate": 2048,
+      "rcmode": "cbr",
+      "interval": 30
+    }
+  },
+  "audio": {
+    "enable": 1,
+    "samplerate": 44100,
+    "bitwidth": 16,
+    "soundMode": "Stereo",
+    "encMode": "AAC",
+    "bitrate": 96000,
+    "volume": 60
+  },
+  "image": {
+    "focus_mode": "auto",
+    "focus_distance": "1.5m",
+    "exposure_mode": "auto",
+    "anti_flicker": 2,
+    "gain_limit": 15,
+    "WB_mode": "one push",
+    "mirror": 0,
+    "flip": 0,
+    "backlight_compensation": 0,
+    "gamma": 0,
+    "WDR_enable": 0,
+    "WDR_level": 0,
+    "brightness": 8,
+    "sharpness": 3,
+    "contrast": 8,
+    "saturation": 8,
+    "noise_reduction_2D": 1,
+    "noise_reduction_3D": 0,
+    "ircut": 0
+  }
+}
