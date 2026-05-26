@@ -279,6 +279,7 @@ class CamTesterApp(tk.Tk):
 
         # Health check state
         self._health_check_running = False
+        self._pending_update_bytes = None
 
         # Stream Deck — connects in background, won't block startup
         self.sd = StreamDeckManager(callback=self.sd_button,
@@ -373,8 +374,9 @@ class CamTesterApp(tk.Tk):
 
         elif self.current_screen == "updating":
             if n == 1:
-                # Install if available
-                pass
+                # Trigger install if the button is available
+                if hasattr(self, "_pending_update_bytes") and self._pending_update_bytes:
+                    self._do_update(self._pending_update_bytes)
             elif n == 6:
                 self.show_home()
 
@@ -1853,6 +1855,7 @@ class CamTesterApp(tk.Tk):
                     self.after(0, lambda: self.update_status_var.set("✓  You are on the latest version"))
                     self.after(0, self._show_update_back_btn)
                 else:
+                    self._pending_update_bytes = latest
                     self.after(0, lambda: self.update_status_var.set("Update available — ready to install"))
                     self.after(0, lambda l=latest: self._show_update_install_btn(l))
 
