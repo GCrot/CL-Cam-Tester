@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
