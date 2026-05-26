@@ -18,6 +18,8 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
+APP_VERSION = "1.0.0"
+
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
 # ─────────────────────────────────────────────
@@ -399,6 +401,9 @@ class CamTesterApp(tk.Tk):
         tk.Label(centre, text="Camera Tester",
                  font=self.font_lg, bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.38, anchor="center")
 
+        tk.Label(centre, text=f"v{APP_VERSION}",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.46, anchor="center")
+
         # Divider
         tk.Frame(centre, bg=ACCENT, height=2, width=400).place(relx=0.5, rely=0.48, anchor="center")
 
@@ -472,6 +477,9 @@ class CamTesterApp(tk.Tk):
                  bg=ACCENT, fg=TEXT_PRIMARY).pack(side="left", padx=16, pady=10)
         tk.Label(header, text="Camera Tester",
                  font=self.font_sm, bg=ACCENT, fg="#ffcccc").pack(side="left", padx=2)
+        tk.Label(header, text=f"v{APP_VERSION}",
+                 font=self.font_xs, bg=ACCENT2, fg="#ffcccc",
+                 padx=8, pady=4).pack(side="left", padx=8)
 
         # Pi IP address — right side of header
         self.home_ip_var = tk.StringVar(value=f"IP:  {self.pi_ip}")
