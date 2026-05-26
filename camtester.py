@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -311,8 +311,8 @@ class CamTesterApp(tk.Tk):
 
     def sd_combo(self, buttons):
         """Handle Stream Deck button combos."""
-        # Upper right (3) + Lower left (4) = hidden update trigger
-        if buttons == frozenset({3, 4}):
+        # Bottom row (4+5+6) = hidden update trigger
+        if frozenset({4, 5, 6}).issubset(buttons):
             if self.current_screen == "home":
                 self.after(0, self._confirm_update)
 
@@ -351,7 +351,7 @@ class CamTesterApp(tk.Tk):
         if self.current_screen == "home":
             if n == 1:
                 self.start_scan()
-            elif n == 6:
+            elif n == 3:
                 self.reboot_device()
 
         elif self.current_screen == "update_confirm":
@@ -571,7 +571,7 @@ class CamTesterApp(tk.Tk):
                  font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.62, anchor="center")
 
         # Stream Deck hint bar
-        self._draw_sd_hints(self.container, {1: "SCAN", 6: "REBOOT"})
+        self._draw_sd_hints(self.container, {1: "SCAN", 3: "REBOOT"})
 
     def _refresh_home_ip(self):
         """Keep the IP label on the home screen up to date every 5 seconds."""
