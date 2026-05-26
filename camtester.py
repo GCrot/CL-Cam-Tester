@@ -296,6 +296,8 @@ class CamTesterApp(tk.Tk):
         if self.current_screen == "home":
             if n == 1:
                 self.start_scan()
+            elif n == 3:
+                self.check_for_update()
             elif n == 6:
                 self.reboot_device()
 
@@ -308,6 +310,13 @@ class CamTesterApp(tk.Tk):
                 self.start_scan()
             elif n == 4:
                 self.connect_selected()
+            elif n == 6:
+                self.show_home()
+
+        elif self.current_screen == "updating":
+            if n == 1:
+                # Install if available
+                pass
             elif n == 6:
                 self.show_home()
 
@@ -495,8 +504,14 @@ class CamTesterApp(tk.Tk):
         tk.Label(centre, text="NDI + RTSP  ·  Tap to scan the network",
                  font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.62, anchor="center")
 
+        # Small update button bottom right
+        tk.Button(centre, text="Check for Update",
+                  font=self.font_xs, bg=BG_CARD, fg=TEXT_DIM,
+                  relief="flat", padx=12, pady=6,
+                  command=self.check_for_update).place(relx=0.98, rely=0.97, anchor="se")
+
         # Stream Deck hint bar
-        self._draw_sd_hints(self.container, {1: "SCAN", 6: "REBOOT"})
+        self._draw_sd_hints(self.container, {1: "SCAN", 3: "UPDATE", 6: "REBOOT"})
 
     def _refresh_home_ip(self):
         """Keep the IP label on the home screen up to date every 5 seconds."""
@@ -1696,7 +1711,121 @@ class CamTesterApp(tk.Tk):
         self.sd.close()
         self.destroy()
 
-    def _show_reset_success(self):
+    # ─────────────────────────────────────────
+    #  UPDATE FROM GITHUB
+    # ─────────────────────────────────────────
+    REPO_RAW = "https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main"
+    APP_PATH = os.path.expanduser("~/camtester/camtester.py")
+
+    def check_for_update(self):
+        """Check GitHub for a newer version and prompt to update."""
+        self.current_screen = "updating"
+        self.clear_container()
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        self.update_status_var = tk.StringVar(value="Checking for updates…")
+        tk.Label(centre, text="Software Update", font=self.font_xl,
+                 bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.30, anchor="center")
+        tk.Label(centre, textvariable=self.update_status_var,
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.45, anchor="center")
+
+        self.update_btn_frame = tk.Frame(centre, bg=BG_DARK)
+        self.update_btn_frame.place(relx=0.5, rely=0.65, anchor="center")
+
+        self._draw_sd_hints(self.container, {6: "CANCEL"})
+
+        def _check():
+            import urllib.request
+            import hashlib
+
+            try:
+                # Fetch latest version from GitHub
+                url = f"{self.REPO_RAW}/camtester.py"
+                req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    latest = resp.read()
+
+                # Compare with current version
+                with open(self.APP_PATH, "rb") as f:
+                    current = f.read()
+
+                if hashlib.md5(latest).hexdigest() == hashlib.md5(current).hexdigest():
+                    self.after(0, lambda: self.update_status_var.set("✓  You are on the latest version"))
+                    self.after(0, self._show_update_back_btn)
+                else:
+                    self.after(0, lambda: self.update_status_var.set("Update available — ready to install"))
+                    self.after(0, lambda l=latest: self._show_update_install_btn(l))
+
+            except Exception as e:
+                err = str(e)
+                self.after(0, lambda: self.update_status_var.set(f"⚠  Could not check for updates:\n{err}"))
+                self.after(0, self._show_update_back_btn)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _show_update_back_btn(self):
+        for w in self.update_btn_frame.winfo_children():
+            w.destroy()
+        tk.Button(self.update_btn_frame, text="  BACK  ", font=self.font_lg,
+                  bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
+                  padx=30, pady=14,
+                  command=self.show_home).pack()
+        self._draw_sd_hints(self.container, {6: "BACK"})
+
+    def _show_update_install_btn(self, latest_bytes):
+        for w in self.update_btn_frame.winfo_children():
+            w.destroy()
+        tk.Button(self.update_btn_frame, text="  INSTALL UPDATE  ", font=self.font_lg,
+                  bg=SUCCESS, fg="#000000", relief="flat",
+                  padx=30, pady=14,
+                  command=lambda: self._do_update(latest_bytes)).pack(side="left", padx=10)
+        tk.Button(self.update_btn_frame, text="  CANCEL  ", font=self.font_lg,
+                  bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
+                  padx=30, pady=14,
+                  command=self.show_home).pack(side="left", padx=10)
+        self._draw_sd_hints(self.container, {1: "INSTALL", 6: "CANCEL"})
+
+    def _do_update(self, latest_bytes):
+        """Write new version to disk and restart the app."""
+        self.update_status_var.set("Installing update…")
+        for w in self.update_btn_frame.winfo_children():
+            w.destroy()
+
+        def _install():
+            try:
+                # Back up current version
+                backup = self.APP_PATH + ".bak"
+                import shutil
+                shutil.copy2(self.APP_PATH, backup)
+
+                # Write new version
+                with open(self.APP_PATH, "wb") as f:
+                    f.write(latest_bytes)
+
+                self.after(0, lambda: self.update_status_var.set("✓  Update installed — restarting…"))
+                time.sleep(2)
+
+                # Restart the app
+                self.after(0, self._restart_app)
+
+            except Exception as e:
+                err = str(e)
+                self.after(0, lambda: self.update_status_var.set(f"⚠  Update failed: {err}"))
+                self.after(0, self._show_update_back_btn)
+
+        threading.Thread(target=_install, daemon=True).start()
+
+    def _restart_app(self):
+        """Restart the application by re-executing Python with the new file."""
+        import subprocess
+        self.sd.clear()
+        self.destroy()
+        subprocess.Popen(
+            ["python3", self.APP_PATH],
+            env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":0")}
+        )
         """Show a clear success screen that the operator must dismiss."""
         self.current_screen = "reset_success"
         self.clear_container()
