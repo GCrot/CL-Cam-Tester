@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -93,15 +93,18 @@ class StreamDeckManager:
         "reboot":    ("#cc0000", "#ffffff"),   # Red — reboot
     }
 
-    def __init__(self, callback):
+    def __init__(self, callback, combo_callback=None):
         """
-        callback(button_number) — called when a button is pressed (1-indexed)
+        callback(button_number) — called on single button press (1-indexed)
+        combo_callback(buttons) — called when a combo of buttons is held simultaneously
         """
-        self.callback   = callback
-        self.deck       = None
-        self._running   = False
-        self._lock      = threading.Lock()
-        self._font      = None
+        self.callback       = callback
+        self.combo_callback = combo_callback
+        self.deck           = None
+        self._running       = False
+        self._lock          = threading.Lock()
+        self._font          = None
+        self._held          = set()   # currently held buttons
         self._connect()
 
     def _connect(self):
@@ -127,10 +130,25 @@ class StreamDeckManager:
         threading.Thread(target=_try, daemon=True).start()
 
     def _on_key(self, deck, key_index, state):
-        """Called by the library on any key event. We only act on press (state=True)."""
-        if state:
-            # key_index is 0-based, we use 1-based
-            self.callback(key_index + 1)
+        """Called by the library on any key event."""
+        btn = key_index + 1  # convert to 1-based
+
+        if state:  # button pressed
+            self._held.add(btn)
+            # Check for combo — fire if 2+ buttons held
+            if len(self._held) >= 2 and self.combo_callback:
+                self.combo_callback(frozenset(self._held))
+            else:
+                # Single press — fire after short delay to allow combo detection
+                held_snapshot = frozenset(self._held)
+                def _delayed_single(b=btn, snap=held_snapshot):
+                    import time
+                    time.sleep(0.08)
+                    if snap == self._held:  # no other button was pressed
+                        self.callback(b)
+                threading.Thread(target=_delayed_single, daemon=True).start()
+        else:  # button released
+            self._held.discard(btn)
 
     def _get_font(self, size=16):
         """Load a font for button labels, falling back to default."""
@@ -263,7 +281,8 @@ class CamTesterApp(tk.Tk):
         self._health_check_running = False
 
         # Stream Deck — connects in background, won't block startup
-        self.sd = StreamDeckManager(callback=self.sd_button)
+        self.sd = StreamDeckManager(callback=self.sd_button,
+                                    combo_callback=self.sd_combo)
 
         # Fonts
         self.font_xl    = tkfont.Font(family="DejaVu Sans", size=28, weight="bold")
@@ -289,8 +308,41 @@ class CamTesterApp(tk.Tk):
         self.bind("<Escape>", lambda e: self.go_back())
         self.focus_set()
 
-    # ─────────────────────────────────────────
-    #  STREAM DECK BUTTON HANDLER
+    def sd_combo(self, buttons):
+        """Handle Stream Deck button combos."""
+        # Upper right (3) + Lower left (4) = hidden update trigger
+        if buttons == frozenset({3, 4}):
+            if self.current_screen == "home":
+                self.after(0, self._confirm_update)
+
+    def _confirm_update(self):
+        """Show update confirmation before proceeding."""
+        self.current_screen = "update_confirm"
+        self.clear_container()
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        tk.Label(centre, text="Check for Update?",
+                 font=self.font_xl, bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.30, anchor="center")
+        tk.Label(centre, text="The device will connect to the internet to check for updates.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.43, anchor="center")
+        tk.Label(centre, text="Make sure the Pi is plugged into a network with internet access.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.51, anchor="center")
+
+        btn_frame = tk.Frame(centre, bg=BG_DARK)
+        btn_frame.place(relx=0.5, rely=0.68, anchor="center")
+
+        tk.Button(btn_frame, text="  CHECK FOR UPDATE  ", font=self.font_lg,
+                  bg=ACCENT, fg=TEXT_PRIMARY, relief="flat",
+                  padx=30, pady=14,
+                  command=self.check_for_update).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="  CANCEL  ", font=self.font_lg,
+                  bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
+                  padx=30, pady=14,
+                  command=self.show_home).pack(side="left", padx=20)
+
+        self._draw_sd_hints(self.container, {1: "UPDATE", 6: "CANCEL"})
     #  Map your 6 buttons here. BitFocus Companion
     #  should run: xdotool key F1  (through F6)
     # ─────────────────────────────────────────
@@ -298,10 +350,14 @@ class CamTesterApp(tk.Tk):
         if self.current_screen == "home":
             if n == 1:
                 self.start_scan()
-            elif n == 3:
-                self.check_for_update()
             elif n == 6:
                 self.reboot_device()
+
+        elif self.current_screen == "update_confirm":
+            if n == 1:
+                self.check_for_update()
+            elif n == 6:
+                self.show_home()
 
         elif self.current_screen == "scanning":
             if n == 6:
@@ -512,14 +568,8 @@ class CamTesterApp(tk.Tk):
         tk.Label(centre, text="NDI + RTSP  ·  Tap to scan the network",
                  font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.62, anchor="center")
 
-        # Small update button bottom right
-        tk.Button(centre, text="Check for Update",
-                  font=self.font_xs, bg=BG_CARD, fg=TEXT_DIM,
-                  relief="flat", padx=12, pady=6,
-                  command=self.check_for_update).place(relx=0.98, rely=0.97, anchor="se")
-
         # Stream Deck hint bar
-        self._draw_sd_hints(self.container, {1: "SCAN", 3: "UPDATE", 6: "REBOOT"})
+        self._draw_sd_hints(self.container, {1: "SCAN", 6: "REBOOT"})
 
     def _refresh_home_ip(self):
         """Keep the IP label on the home screen up to date every 5 seconds."""
