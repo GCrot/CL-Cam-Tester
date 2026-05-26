@@ -169,7 +169,8 @@ success "Auto-login configured"
 # ─────────────────────────────────────────────
 #  7. STATIC IP (192.168.100.1/24)
 # ─────────────────────────────────────────────
-info "Configuring static IP…"
+info "Configuring network…"
+# Static IP for camera testing
 nmcli connection delete eth0-static 2>/dev/null || true
 nmcli connection add \
   con-name "eth0-static" \
@@ -179,7 +180,18 @@ nmcli connection add \
   ipv4.addresses "192.168.100.1/24" \
   ipv4.routes "0.0.0.0/0" \
   connection.autoconnect yes 2>/dev/null || true
-success "Static IP configured (192.168.100.1/24)"
+
+# DHCP profile — used only for updates, autoconnect off
+nmcli connection delete eth0-dhcp 2>/dev/null || true
+nmcli connection add \
+  con-name "eth0-dhcp" \
+  ifname eth0 \
+  type ethernet \
+  ipv4.method auto \
+  ipv4.dhcp-timeout 15 \
+  connection.autoconnect no 2>/dev/null || true
+
+success "Network configured (static: 192.168.100.1/24)"
 
 # ─────────────────────────────────────────────
 #  8. STREAM DECK UDEV RULE
@@ -196,7 +208,7 @@ success "Stream Deck permissions configured"
 #  9. SUDOERS — passwordless ip and reboot
 # ─────────────────────────────────────────────
 info "Configuring sudoers…"
-echo "$REAL_USER ALL=(ALL) NOPASSWD: /sbin/ip, /sbin/reboot, /usr/sbin/arping" \
+echo "$REAL_USER ALL=(ALL) NOPASSWD: /sbin/ip, /sbin/reboot, /usr/sbin/arping, /usr/bin/nmcli" \
   > /etc/sudoers.d/camtester
 chmod 440 /etc/sudoers.d/camtester
 success "Sudoers configured"
