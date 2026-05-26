@@ -1725,7 +1725,7 @@ class CamTesterApp(tk.Tk):
         centre = tk.Frame(self.container, bg=BG_DARK)
         centre.pack(fill="both", expand=True)
 
-        self.update_status_var = tk.StringVar(value="Checking for updates…")
+        self.update_status_var = tk.StringVar(value="Checking internet connection…")
         tk.Label(centre, text="Software Update", font=self.font_xl,
                  bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.30, anchor="center")
         tk.Label(centre, textvariable=self.update_status_var,
@@ -1740,14 +1740,54 @@ class CamTesterApp(tk.Tk):
             import urllib.request
             import hashlib
 
+            # Step 1 — Check if we have internet
+            has_internet = False
             try:
-                # Fetch latest version from GitHub
+                urllib.request.urlopen("https://github.com", timeout=5)
+                has_internet = True
+            except Exception:
+                pass
+
+            if not has_internet:
+                # Try switching to DHCP to get internet
+                self.after(0, lambda: self.update_status_var.set(
+                    "No internet detected.\nConnecting to network via DHCP…"))
+                try:
+                    subprocess.run(
+                        ["sudo", "nmcli", "connection", "up", "eth0-dhcp"],
+                        capture_output=True, timeout=15
+                    )
+                    # Wait up to 20 seconds for internet
+                    for i in range(20):
+                        time.sleep(1)
+                        self.after(0, lambda s=i+1: self.update_status_var.set(
+                            f"Waiting for network… ({s}s)\nPlug into a network with internet access"))
+                        try:
+                            urllib.request.urlopen("https://github.com", timeout=3)
+                            has_internet = True
+                            break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            if not has_internet:
+                self.after(0, lambda: self.update_status_var.set(
+                    "⚠  No internet connection.\nPlug into a network and try again."))
+                self.after(0, self._show_update_back_btn)
+                # Restore static IP
+                subprocess.run(["sudo", "nmcli", "connection", "up", "eth0-static"],
+                               capture_output=True, timeout=10)
+                return
+
+            # Step 2 — Check for update
+            self.after(0, lambda: self.update_status_var.set("Checking for updates…"))
+            try:
                 url = f"{self.REPO_RAW}/camtester.py"
                 req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     latest = resp.read()
 
-                # Compare with current version
                 with open(self.APP_PATH, "rb") as f:
                     current = f.read()
 
@@ -1762,6 +1802,10 @@ class CamTesterApp(tk.Tk):
                 err = str(e)
                 self.after(0, lambda: self.update_status_var.set(f"⚠  Could not check for updates:\n{err}"))
                 self.after(0, self._show_update_back_btn)
+
+            # Restore static IP after check
+            subprocess.run(["sudo", "nmcli", "connection", "up", "eth0-static"],
+                           capture_output=True, timeout=10)
 
         threading.Thread(target=_check, daemon=True).start()
 
