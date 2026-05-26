@@ -135,6 +135,7 @@ xset s off &
 xset -dpms &
 xset s noblank &
 xrandr --output DSI-1 --rotate right &
+nmcli connection up eth0-static 2>/dev/null &
 
 sleep 1
 python3 $APP_DIR/camtester.py &
