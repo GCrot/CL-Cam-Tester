@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1003,6 +1003,8 @@ class CamTesterApp(tk.Tk):
             except Exception:
                 pass
         self.after(0, _do)
+
+    def _launch_stream(self, cam):
         """Route to the correct playback method based on camera type."""
         if cam["type"] == "NDI":
             self._launch_ndi(cam)
