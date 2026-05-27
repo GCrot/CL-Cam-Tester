@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -570,8 +570,8 @@ class CamTesterApp(tk.Tk):
         tk.Label(centre, text="NDI + RTSP  ·  Tap to scan the network",
                  font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.62, anchor="center")
 
-        # Stream Deck hint bar
-        self._draw_sd_hints(self.container, {1: "SCAN", 3: "REBOOT"})
+        # Stream Deck hint bar — delayed slightly to ensure previous state clears
+        self.after(300, lambda: self._draw_sd_hints(self.container, {1: "SCAN", 3: "REBOOT"}))
 
     def _refresh_home_ip(self):
         """Keep the IP label on the home screen up to date every 5 seconds."""
