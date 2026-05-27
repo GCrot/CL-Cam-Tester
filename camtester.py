@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.5"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1651,9 +1651,20 @@ class CamTesterApp(tk.Tk):
                     self.after(3000, self.show_home)
                     return
 
-                # Step 3 — Add 192.168.1.x to eth0 so we can reach default IP
-                _update("Camera rebooting…", "Adding route to default subnet")
-                self._add_host_route(default_ip)
+                # Step 3 — Add 192.168.1.x to eth0 so we can reach camera at default IP
+                _update("Camera rebooting…", "Configuring network for default camera IP")
+                try:
+                    subprocess.run(
+                        ["sudo", "ip", "addr", "add", "192.168.1.2/24", "dev", "eth0"],
+                        capture_output=True, timeout=5
+                    )
+                    subprocess.run(
+                        ["sudo", "arping", "-c", "2", "-A", "-I", "eth0", "192.168.1.2"],
+                        capture_output=True, timeout=5
+                    )
+                except Exception as e:
+                    print(f"Route add error: {e}")
+                time.sleep(1)
 
                 # Step 4 — Wait for camera to come back online at default IP
                 _update("Waiting for camera to reboot…", "This may take 30–60 seconds")
@@ -1759,6 +1770,7 @@ class CamTesterApp(tk.Tk):
                 self.after(4000, self.show_home)
 
         threading.Thread(target=_reset, daemon=True).start()
+        self._draw_sd_hints(self.container, {})
 
     def _show_toast(self, msg, duration=3000):
         """Show a temporary status message overlay."""
