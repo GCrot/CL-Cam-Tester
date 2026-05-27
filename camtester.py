@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -84,17 +84,19 @@ class VISCAZoomController:
     CMD_ZOOM_STOP = bytes([0x81, 0x01, 0x04, 0x07, 0x00, 0xFF])
     CMD_ZOOM_INQ  = bytes([0x81, 0x09, 0x04, 0x47, 0xFF])
 
-    def __init__(self, ip, zoom_update_cb=None):
+    def __init__(self, ip, zoom_update_cb=None, connect_delay=0):
         self.ip             = ip
         self.zoom_update_cb = zoom_update_cb
         self._sock          = None
         self._zooming       = False
         self._lock          = threading.Lock()
-        self._connect()
+        self._connect(connect_delay)
 
-    def _connect(self):
-        """Connect to VISCA port in background."""
+    def _connect(self, delay=0):
+        """Connect to VISCA port in background, optionally after a delay."""
         def _try():
+            if delay:
+                time.sleep(delay)
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(3)
@@ -975,17 +977,18 @@ class CamTesterApp(tk.Tk):
         self._current_cam = cam
         wid = self.video_frame.winfo_id()
 
-        # Initialise VISCA zoom controller for NDI cameras
+        # Initialise VISCA zoom controller for NDI cameras — delayed so NDI connects first
         if cam["type"] == "NDI":
             self._zoom_controller = VISCAZoomController(
                 cam.get("ip", ""),
-                zoom_update_cb=self._update_zoom_display
+                zoom_update_cb=self._update_zoom_display,
+                connect_delay=3.0
             )
         else:
             self._zoom_controller = None
 
         self._launch_stream(cam)
-        self._draw_sd_hints(self.container, {1: "ZOOM IN", 4: "ZOOM OUT", 5: "RESET", 6: "STOP"})
+        self._draw_sd_hints(self.container, {1: "ZOOM +", 4: "ZOOM -", 5: "RESET", 6: "STOP"})
 
     def _update_zoom_display(self, position, max_pos=1024):
         """Update the zoom level bar and percentage label."""
