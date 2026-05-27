@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1971,6 +1971,37 @@ class CamTesterApp(tk.Tk):
                   command=self.show_home).place(relx=0.5, rely=0.80, anchor="center")
 
         # Green bottom stripe
+        tk.Frame(self.container, bg=SUCCESS, height=6).pack(side="bottom", fill="x")
+
+        self._draw_sd_hints(self.container, {1: "DONE"})
+
+    def _show_reset_success(self):
+        """Show a clear success screen that the operator must dismiss."""
+        self.current_screen = "reset_success"
+        self.clear_container()
+
+        tk.Frame(self.container, bg=SUCCESS, height=6).pack(fill="x")
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        tk.Label(centre, text="✓", font=tkfont.Font(family="DejaVu Sans", size=72),
+                 bg=BG_DARK, fg=SUCCESS).place(relx=0.5, rely=0.22, anchor="center")
+
+        tk.Label(centre, text="Camera Reset Complete",
+                 font=self.font_xl, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.45, anchor="center")
+
+        tk.Label(centre, text="Factory defaults restored  ·  Recommended settings applied",
+                 font=self.font_sm, bg=BG_DARK, fg=SUCCESS).place(relx=0.5, rely=0.56, anchor="center")
+
+        tk.Label(centre, text="Camera is ready for deployment.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.64, anchor="center")
+
+        tk.Button(centre, text="  DONE  ", font=self.font_lg,
+                  bg=SUCCESS, fg="#000000", relief="flat",
+                  padx=40, pady=14,
+                  command=self.show_home).place(relx=0.5, rely=0.80, anchor="center")
+
         tk.Frame(self.container, bg=SUCCESS, height=6).pack(side="bottom", fill="x")
 
         self._draw_sd_hints(self.container, {1: "DONE"})
