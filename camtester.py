@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -77,7 +77,7 @@ class VISCAZoomController:
     stops when button is released.
     """
     VISCA_PORT = 52381
-    ZOOM_MAX   = 1024   # 0x0400 for AIDA HD-NDI-X20
+    ZOOM_MAX   = 16384  # 0x4000 standard VISCA max zoom
 
     CMD_ZOOM_TELE = bytes([0x81, 0x01, 0x04, 0x07, 0x02, 0xFF])
     CMD_ZOOM_WIDE = bytes([0x81, 0x01, 0x04, 0x07, 0x03, 0xFF])
@@ -968,9 +968,6 @@ class CamTesterApp(tk.Tk):
             tk.Label(zoom_bar, textvariable=self.zoom_pct_var,
                      font=self.font_xs, bg="#0a0a0a",
                      fg=TEXT_PRIMARY, width=5).pack(side="left")
-
-            tk.Label(zoom_bar, text="▲ B1  ZOOM IN    ▼ B4  ZOOM OUT",
-                     font=self.font_xs, bg="#0a0a0a", fg=TEXT_DIM).pack(side="left", padx=20)
 
         self.update_idletasks()
 
