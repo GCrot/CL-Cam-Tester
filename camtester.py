@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -68,6 +68,112 @@ TEXT_MID     = "#aaaaaa"       # Mid text
 BORDER       = "#2a2a2a"       # Subtle border
 
 # ─────────────────────────────────────────────
+#  VISCA ZOOM CONTROLLER
+# ─────────────────────────────────────────────
+class VISCAZoomController:
+    """
+    Controls camera zoom via VISCA over IP (TCP port 52381).
+    Sends continuous zoom commands while button is held,
+    stops when button is released.
+    """
+    VISCA_PORT = 52381
+    ZOOM_MAX   = 1024   # 0x0400 for AIDA HD-NDI-X20
+
+    CMD_ZOOM_TELE = bytes([0x81, 0x01, 0x04, 0x07, 0x02, 0xFF])
+    CMD_ZOOM_WIDE = bytes([0x81, 0x01, 0x04, 0x07, 0x03, 0xFF])
+    CMD_ZOOM_STOP = bytes([0x81, 0x01, 0x04, 0x07, 0x00, 0xFF])
+    CMD_ZOOM_INQ  = bytes([0x81, 0x09, 0x04, 0x47, 0xFF])
+
+    def __init__(self, ip, zoom_update_cb=None):
+        self.ip             = ip
+        self.zoom_update_cb = zoom_update_cb
+        self._sock          = None
+        self._zooming       = False
+        self._lock          = threading.Lock()
+        self._connect()
+
+    def _connect(self):
+        """Connect to VISCA port in background."""
+        def _try():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                s.connect((self.ip, self.VISCA_PORT))
+                s.settimeout(0.5)
+                with self._lock:
+                    self._sock = s
+                print(f"VISCA connected to {self.ip}:{self.VISCA_PORT}")
+                self._poll_zoom_position()
+            except Exception as e:
+                print(f"VISCA connection failed: {e}")
+        threading.Thread(target=_try, daemon=True).start()
+
+    def _send(self, cmd):
+        """Send a VISCA command and return response."""
+        with self._lock:
+            if not self._sock:
+                return None
+            try:
+                self._sock.send(cmd)
+                return self._sock.recv(16)
+            except Exception:
+                self._sock = None
+                return None
+
+    def _parse_zoom_position(self, response):
+        """Extract zoom position from VISCA inquiry response."""
+        if not response or len(response) < 7:
+            return None
+        # Response: 90 50 0p 0q 0r 0s FF
+        try:
+            p = (response[2] & 0x0F) << 12
+            q = (response[3] & 0x0F) << 8
+            r = (response[4] & 0x0F) << 4
+            s = (response[5] & 0x0F)
+            return p | q | r | s
+        except Exception:
+            return None
+
+    def _poll_zoom_position(self):
+        """Poll zoom position every 500ms and update display."""
+        def _poll():
+            while self._sock:
+                resp = self._send(self.CMD_ZOOM_INQ)
+                pos  = self._parse_zoom_position(resp)
+                if pos is not None and self.zoom_update_cb:
+                    self.zoom_update_cb(pos, self.ZOOM_MAX)
+                time.sleep(0.5)
+        threading.Thread(target=_poll, daemon=True).start()
+
+    def start_zoom(self, direction):
+        """Start continuous zoom. direction: 'tele' or 'wide'."""
+        if self._zooming:
+            return
+        self._zooming = True
+        cmd = self.CMD_ZOOM_TELE if direction == "tele" else self.CMD_ZOOM_WIDE
+
+        def _zoom():
+            self._send(cmd)
+        threading.Thread(target=_zoom, daemon=True).start()
+
+    def stop_zoom(self):
+        """Stop zoom."""
+        self._zooming = False
+        threading.Thread(target=lambda: self._send(self.CMD_ZOOM_STOP),
+                         daemon=True).start()
+
+    def close(self):
+        self.stop_zoom()
+        with self._lock:
+            if self._sock:
+                try:
+                    self._sock.close()
+                except Exception:
+                    pass
+                self._sock = None
+
+
+# ─────────────────────────────────────────────
 #  STREAM DECK MANAGER
 # ─────────────────────────────────────────────
 class StreamDeckManager:
@@ -93,18 +199,15 @@ class StreamDeckManager:
         "reboot":    ("#cc0000", "#ffffff"),   # Red — reboot
     }
 
-    def __init__(self, callback, combo_callback=None):
-        """
-        callback(button_number) — called on single button press (1-indexed)
-        combo_callback(buttons) — called when a combo of buttons is held simultaneously
-        """
-        self.callback       = callback
-        self.combo_callback = combo_callback
-        self.deck           = None
-        self._running       = False
-        self._lock          = threading.Lock()
-        self._font          = None
-        self._held          = set()   # currently held buttons
+    def __init__(self, callback, combo_callback=None, release_callback=None):
+        self.callback         = callback
+        self.combo_callback   = combo_callback
+        self.release_callback = release_callback
+        self.deck             = None
+        self._running         = False
+        self._lock            = threading.Lock()
+        self._font            = None
+        self._held            = set()
         self._connect()
 
     def _connect(self):
@@ -149,6 +252,8 @@ class StreamDeckManager:
                 threading.Thread(target=_delayed_single, daemon=True).start()
         else:  # button released
             self._held.discard(btn)
+            if self.release_callback:
+                self.release_callback(btn)
 
     def _get_font(self, size=16):
         """Load a font for button labels, falling back to default."""
@@ -283,7 +388,8 @@ class CamTesterApp(tk.Tk):
 
         # Stream Deck — connects in background, won't block startup
         self.sd = StreamDeckManager(callback=self.sd_button,
-                                    combo_callback=self.sd_combo)
+                                    combo_callback=self.sd_combo,
+                                    release_callback=self.sd_release)
 
         # Fonts
         self.font_xl    = tkfont.Font(family="DejaVu Sans", size=28, weight="bold")
@@ -308,6 +414,13 @@ class CamTesterApp(tk.Tk):
         self.bind("<F6>", lambda e: self.sd_button(6))
         self.bind("<Escape>", lambda e: self.go_back())
         self.focus_set()
+
+    def sd_release(self, n):
+        """Handle Stream Deck button release."""
+        if self.current_screen == "playback":
+            if n in (1, 4):
+                if hasattr(self, "_zoom_controller") and self._zoom_controller:
+                    self._zoom_controller.stop_zoom()
 
     def sd_combo(self, buttons):
         """Handle Stream Deck button combos."""
@@ -400,7 +513,13 @@ class CamTesterApp(tk.Tk):
                 # just dismiss — the overlay has its own cancel button
 
         elif self.current_screen == "playback":
-            if n == 5:
+            if n == 1:
+                if hasattr(self, "_zoom_controller") and self._zoom_controller:
+                    self._zoom_controller.start_zoom("tele")
+            elif n == 4:
+                if hasattr(self, "_zoom_controller") and self._zoom_controller:
+                    self._zoom_controller.start_zoom("wide")
+            elif n == 5:
                 if hasattr(self, "_current_cam"):
                     self._confirm_factory_reset(self._current_cam)
             elif n == 6:
@@ -823,15 +942,64 @@ class CamTesterApp(tk.Tk):
         # Video frame
         self.video_frame = tk.Frame(self.container, bg="#000000")
         self.video_frame.pack(fill="both", expand=True)
+
+        # Zoom overlay — bottom left, only for NDI cameras with VISCA
+        if cam["type"] == "NDI":
+            zoom_bar = tk.Frame(self.container, bg="#0a0a0a", height=44)
+            zoom_bar.pack(fill="x", side="bottom")
+            zoom_bar.pack_propagate(False)
+
+            tk.Label(zoom_bar, text="ZOOM", font=self.font_xs,
+                     bg="#0a0a0a", fg=TEXT_DIM).pack(side="left", padx=12)
+
+            # Zoom level bar
+            self.zoom_canvas = tk.Canvas(zoom_bar, bg="#0a0a0a",
+                                         width=300, height=16,
+                                         highlightthickness=0)
+            self.zoom_canvas.pack(side="left", padx=8, pady=14)
+            self.zoom_canvas.create_rectangle(0, 0, 300, 16,
+                                              fill=BG_CARD, outline="", tags="bg")
+            self.zoom_canvas.create_rectangle(0, 0, 0, 16,
+                                              fill=ACCENT, outline="", tags="fill")
+
+            self.zoom_pct_var = tk.StringVar(value="0%")
+            tk.Label(zoom_bar, textvariable=self.zoom_pct_var,
+                     font=self.font_xs, bg="#0a0a0a",
+                     fg=TEXT_PRIMARY, width=5).pack(side="left")
+
+            tk.Label(zoom_bar, text="▲ B1  ZOOM IN    ▼ B4  ZOOM OUT",
+                     font=self.font_xs, bg="#0a0a0a", fg=TEXT_DIM).pack(side="left", padx=20)
+
         self.update_idletasks()
 
         self._current_cam = cam
         wid = self.video_frame.winfo_id()
+
+        # Initialise VISCA zoom controller for NDI cameras
+        if cam["type"] == "NDI":
+            self._zoom_controller = VISCAZoomController(
+                cam.get("ip", ""),
+                zoom_update_cb=self._update_zoom_display
+            )
+        else:
+            self._zoom_controller = None
+
         self._launch_stream(cam)
+        self._draw_sd_hints(self.container, {1: "ZOOM IN", 4: "ZOOM OUT", 5: "RESET", 6: "STOP"})
 
-        self._draw_sd_hints(self.container, {5: "RESET", 6: "STOP"})
-
-    def _launch_stream(self, cam):
+    def _update_zoom_display(self, position, max_pos=1024):
+        """Update the zoom level bar and percentage label."""
+        if not hasattr(self, "zoom_canvas") or not self.zoom_canvas:
+            return
+        pct = int((position / max_pos) * 100)
+        fill_w = int((position / max_pos) * 300)
+        def _do():
+            try:
+                self.zoom_canvas.coords("fill", 0, 0, fill_w, 16)
+                self.zoom_pct_var.set(f"{pct}%")
+            except Exception:
+                pass
+        self.after(0, _do)
         """Route to the correct playback method based on camera type."""
         if cam["type"] == "NDI":
             self._launch_ndi(cam)
@@ -1042,6 +1210,10 @@ class CamTesterApp(tk.Tk):
             self._status_labels = {}
 
     def stop_playback(self):
+        # Stop zoom controller
+        if hasattr(self, "_zoom_controller") and self._zoom_controller:
+            self._zoom_controller.close()
+            self._zoom_controller = None
         # Stop NDI
         self.ndi_running = False
         if hasattr(self, "ndi_canvas"):
