@@ -191,9 +191,10 @@ nmcli connection add \
   type ethernet \
   ipv4.method manual \
   ipv4.addresses "192.168.100.1/24" \
+  ipv4.never-default yes \
   connection.autoconnect yes 2>/dev/null || true
 
-# Add link-local separately (nmcli doesn't support multiple addresses in one command reliably)
+# Add link-local separately
 nmcli connection modify eth0-static +ipv4.addresses "169.254.1.1/16" 2>/dev/null || true
 
 # DHCP profile — used only for updates, autoconnect off
@@ -207,6 +208,74 @@ nmcli connection add \
   connection.autoconnect no 2>/dev/null || true
 
 success "Network configured (static: 192.168.100.1/24)"
+
+# ─────────────────────────────────────────────
+#  ETH MANAGER SERVICE
+# ─────────────────────────────────────────────
+info "Configuring ethernet manager service…"
+cat > /usr/local/bin/eth-manager.sh << 'SCRIPT'
+#!/bin/bash
+IFACE="eth0"
+FALLBACK_IP="192.168.100.1/24"
+
+ip link set "$IFACE" up
+nmcli connection up eth0-dhcp 2>/dev/null
+
+for i in $(seq 1 5); do
+    sleep 1
+    IP=$(ip -4 addr show "$IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '169.254')
+    if [ -n "$IP" ]; then
+        logger "eth-manager: DHCP got $IP"
+        while true; do
+            sleep 5
+            IP=$(ip -4 addr show "$IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '169.254')
+            if [ -z "$IP" ]; then
+                ip addr add "$FALLBACK_IP" dev "$IFACE" 2>/dev/null
+                logger "eth-manager: DHCP dropped, applied fallback"
+                break
+            fi
+        done
+        break
+    fi
+done
+
+IP=$(ip -4 addr show "$IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '169.254')
+if [ -z "$IP" ]; then
+    ip addr add "$FALLBACK_IP" dev "$IFACE" 2>/dev/null
+    logger "eth-manager: no DHCP, applied fallback $FALLBACK_IP"
+fi
+
+while true; do
+    sleep 5
+    ip link set "$IFACE" up 2>/dev/null
+    IP=$(ip -4 addr show "$IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '169.254')
+    if [ -z "$IP" ]; then
+        ip addr add "$FALLBACK_IP" dev "$IFACE" 2>/dev/null
+        logger "eth-manager: re-applied fallback"
+    fi
+done
+SCRIPT
+chmod +x /usr/local/bin/eth-manager.sh
+
+cat > /etc/systemd/system/eth-fallback.service << 'EOF'
+[Unit]
+Description=Ethernet interface manager
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/eth-manager.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable eth-fallback.service
+success "Ethernet manager configured"
 
 # ─────────────────────────────────────────────
 #  8. STREAM DECK UDEV RULE
