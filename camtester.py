@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.6"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -505,12 +505,14 @@ class CamTesterApp(tk.Tk):
 
         elif self.current_screen == "manual_setup":
             if n == 1:
-                # Can't easily pass cam reference here — touchscreen only for browser
-                pass
+                if hasattr(self, "_setup_cam"):
+                    self._launch_setup_browser(self._setup_cam)
+            elif n == 2:
+                self._autofill_password()
             elif n == 4:
                 self._close_browser_and_scan(None)
             elif n == 6:
-                self._close_browser_and_scan(None)
+                subprocess.run(["pkill", "chromium"], capture_output=True)
                 self.show_home()
 
         elif self.current_screen == "reboot":
@@ -1677,6 +1679,7 @@ class CamTesterApp(tk.Tk):
     def show_password_entry(self, cam):
         """Show manual setup screen with option to launch browser."""
         self.current_screen = "manual_setup"
+        self._setup_cam = cam  # Store for SD button access
         self._stop_health_checks()
         self._chromium_proc = None
         self.clear_container()
@@ -1701,12 +1704,18 @@ class CamTesterApp(tk.Tk):
                  font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.52, anchor="center")
 
         btn_frame = tk.Frame(centre, bg=BG_DARK)
-        btn_frame.place(relx=0.5, rely=0.65, anchor="center")
+        btn_frame.place(relx=0.5, rely=0.58, anchor="center")
 
         tk.Button(btn_frame, text="  OPEN BROWSER  ", font=self.font_lg,
                   bg=ACCENT2, fg=TEXT_PRIMARY, relief="flat",
                   padx=24, pady=14,
                   command=lambda: self._launch_setup_browser(cam)
+                  ).pack(side="left", padx=12)
+
+        tk.Button(btn_frame, text="  AUTO-FILL PASSWORD  ", font=self.font_lg,
+                  bg=WARNING, fg="#000000", relief="flat",
+                  padx=24, pady=14,
+                  command=lambda: self._autofill_password()
                   ).pack(side="left", padx=12)
 
         tk.Button(btn_frame, text="  DONE  ", font=self.font_lg,
@@ -1722,7 +1731,7 @@ class CamTesterApp(tk.Tk):
                   ).pack(side="left", padx=12)
 
         tk.Frame(self.container, bg=ACCENT, height=6).pack(side="bottom", fill="x")
-        self._draw_sd_hints(self.container, {1: "BROWSER", 4: "DONE", 6: "CANCEL"})
+        self._draw_sd_hints(self.container, {1: "BROWSER", 2: "AUTO-FILL", 4: "DONE", 6: "CANCEL"})
 
     def _launch_setup_browser(self, cam):
         """Launch Chromium pointing to camera setup page."""
@@ -1755,7 +1764,44 @@ class CamTesterApp(tk.Tk):
             self.deiconify()
             self._setup_status_var.set(f"Could not open browser: {e}")
 
-    def _close_browser_and_scan(self, cam):
+    def _autofill_password(self):
+        """Use xdotool to auto-fill the password in the Chromium browser."""
+        def _fill():
+            import time
+            # Give focus to Chromium
+            subprocess.run(
+                ["xdotool", "search", "--name", "Chromium", "windowfocus", "--sync"],
+                capture_output=True, timeout=5
+            )
+            time.sleep(0.5)
+
+            # Tab to first password field and type password
+            subprocess.run(["xdotool", "key", "Tab"], capture_output=True)
+            time.sleep(0.2)
+            subprocess.run(
+                ["xdotool", "type", "--clearmodifiers", "Repair2023!"],
+                capture_output=True
+            )
+            time.sleep(0.2)
+
+            # Tab to confirm password field and type again
+            subprocess.run(["xdotool", "key", "Tab"], capture_output=True)
+            time.sleep(0.2)
+            subprocess.run(
+                ["xdotool", "type", "--clearmodifiers", "Repair2023!"],
+                capture_output=True
+            )
+            time.sleep(0.2)
+
+            # Tab to Apply button and press Enter
+            subprocess.run(["xdotool", "key", "Tab"], capture_output=True)
+            time.sleep(0.2)
+            subprocess.run(["xdotool", "key", "Return"], capture_output=True)
+
+            self.after(0, lambda: self._setup_status_var.set("✓  Password submitted — click OK if prompted"))
+
+        threading.Thread(target=_fill, daemon=True).start()
+        self._setup_status_var.set("Filling password…")
         """Close browser, restore app window and scan again."""
         if hasattr(self, "_chromium_proc") and self._chromium_proc:
             try:
