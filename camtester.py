@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -501,6 +501,12 @@ class CamTesterApp(tk.Tk):
 
         elif self.current_screen == "reset_success":
             if n == 1:
+                self.show_home()
+
+        elif self.current_screen == "manual_setup":
+            if n == 1:
+                self.start_scan()
+            elif n == 6:
                 self.show_home()
 
         elif self.current_screen == "reboot":
@@ -1592,7 +1598,7 @@ class CamTesterApp(tk.Tk):
         return hosts
 
     def _probe_rtsp_camera(self, ip, port=554):
-        """Try credential + path combos until one works. Return camera dict or None."""
+        """Try known credentials only. If none work, flag for manual setup."""
         for user, pwd in RTSP_CREDENTIALS:
             for path in RTSP_PATHS:
                 if not self.scanning:
@@ -1614,16 +1620,16 @@ class CamTesterApp(tk.Tk):
                         "resolution": info.get("resolution", ""),
                     }
 
-        # All credentials failed — return partial result so user can enter password
+        # Known credentials failed — manual setup required
         return {
-            "type":          "RTSP",
-            "name":          f"RTSP @ {ip}",
-            "ip":            ip,
-            "url":           "",
-            "codec":         "",
-            "resolution":    "",
+            "type":           "RTSP",
+            "name":           f"RTSP @ {ip}",
+            "ip":             ip,
+            "url":            "",
+            "codec":          "",
+            "resolution":     "",
             "needs_password": True,
-            "port":          port,
+            "port":           port,
         }
 
     def _ffprobe_stream(self, url):
@@ -1665,90 +1671,51 @@ class CamTesterApp(tk.Tk):
                 self.show_playback(cam)
 
     def show_password_entry(self, cam):
-        """Show on-screen keyboard for RTSP password entry."""
-        self.current_screen = "password_entry"
+        """Show manual setup required screen."""
+        self.current_screen = "manual_setup"
         self._stop_health_checks()
         self.clear_container()
 
-        # Header
-        header = tk.Frame(self.container, bg=ACCENT, height=52)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-        tk.Frame(header, bg=ACCENT_LIGHT, width=6).pack(side="left", fill="y")
-        tk.Label(header, text="  Enter Camera Password",
-                 font=self.font_md, bg=ACCENT, fg=TEXT_PRIMARY).pack(side="left", padx=10)
+        # Red top stripe
+        tk.Frame(self.container, bg=ACCENT, height=6).pack(fill="x")
 
         centre = tk.Frame(self.container, bg=BG_DARK)
         centre.pack(fill="both", expand=True)
 
-        tk.Label(centre, text=f"Camera: {cam['name']}",
-                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).pack(pady=(20, 5))
-        tk.Label(centre, text="Username: admin",
-                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).pack()
+        tk.Label(centre, text="⚠  Manual Setup Required",
+                 font=self.font_xl, bg=BG_DARK, fg=WARNING).place(relx=0.5, rely=0.22, anchor="center")
 
-        # Password display
-        self._pwd_var = tk.StringVar(value="")
-        pwd_frame = tk.Frame(centre, bg=BG_CARD, padx=10, pady=8)
-        pwd_frame.pack(pady=15, padx=40, fill="x")
-        tk.Label(pwd_frame, text="Password:", font=self.font_sm,
-                 bg=BG_CARD, fg=TEXT_DIM).pack(side="left")
-        self._pwd_display = tk.Label(pwd_frame, textvariable=self._pwd_var,
-                                      font=self.font_md, bg=BG_CARD,
-                                      fg=TEXT_PRIMARY, width=20, anchor="w")
-        self._pwd_display.pack(side="left", padx=10)
+        tk.Label(centre, text=f"Camera found at {cam['ip']} but password is unknown.",
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.36, anchor="center")
 
-        # On-screen keyboard
-        kb_frame = tk.Frame(centre, bg=BG_DARK)
-        kb_frame.pack(pady=5)
+        tk.Label(centre, text="Please complete initial camera setup via a web browser:",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.46, anchor="center")
 
-        rows = [
-            "1234567890",
-            "qwertyuiop",
-            "asdfghjkl",
-            "zxcvbnm!@#",
-            "ZXCVBNM$%^",
-            "&*()-_+=.,"
-        ]
+        # Instructions box
+        inst = tk.Frame(centre, bg=BG_CARD, padx=20, pady=12)
+        inst.place(relx=0.5, rely=0.62, anchor="center", width=700)
 
-        for row in rows:
-            rf = tk.Frame(kb_frame, bg=BG_DARK)
-            rf.pack()
-            for ch in row:
-                tk.Button(rf, text=ch, font=self.font_sm,
-                          bg=BG_CARD2, fg=TEXT_PRIMARY,
-                          relief="flat", width=3, pady=4,
-                          command=lambda c=ch: self._pwd_var.set(self._pwd_var.get() + c)
-                          ).pack(side="left", padx=1, pady=1)
+        tk.Label(inst, text=f"1.  Connect a computer to this network",
+                 font=self.font_sm, bg=BG_CARD, fg=TEXT_PRIMARY, anchor="w").pack(fill="x")
+        tk.Label(inst, text=f"2.  Open  http://{cam['ip']}  in a browser",
+                 font=self.font_sm, bg=BG_CARD, fg=ACCENT, anchor="w").pack(fill="x", pady=2)
+        tk.Label(inst, text=f"3.  Set the password to:  Repair2023!",
+                 font=self.font_sm, bg=BG_CARD, fg=TEXT_PRIMARY, anchor="w").pack(fill="x")
+        tk.Label(inst, text=f"4.  Return here and scan again",
+                 font=self.font_sm, bg=BG_CARD, fg=TEXT_PRIMARY, anchor="w").pack(fill="x", pady=(2, 0))
 
-        # Action buttons
-        btn_frame = tk.Frame(centre, bg=BG_DARK)
-        btn_frame.pack(pady=10)
+        tk.Button(centre, text="  SCAN AGAIN  ", font=self.font_lg,
+                  bg=ACCENT, fg=TEXT_PRIMARY, relief="flat",
+                  padx=30, pady=14,
+                  command=self.start_scan).place(relx=0.35, rely=0.88, anchor="center")
 
-        tk.Button(btn_frame, text="⌫ DEL", font=self.font_sm,
-                  bg=BG_CARD2, fg=WARNING, relief="flat",
-                  padx=16, pady=8,
-                  command=lambda: self._pwd_var.set(self._pwd_var.get()[:-1])
-                  ).pack(side="left", padx=8)
-
-        tk.Button(btn_frame, text="CLEAR", font=self.font_sm,
-                  bg=BG_CARD2, fg=WARNING, relief="flat",
-                  padx=16, pady=8,
-                  command=lambda: self._pwd_var.set("")
-                  ).pack(side="left", padx=8)
-
-        tk.Button(btn_frame, text="CONNECT", font=self.font_sm,
-                  bg=SUCCESS, fg="#000000", relief="flat",
-                  padx=20, pady=8,
-                  command=lambda: self._try_rtsp_with_password(cam, self._pwd_var.get())
-                  ).pack(side="left", padx=8)
-
-        tk.Button(btn_frame, text="CANCEL", font=self.font_sm,
+        tk.Button(centre, text="  BACK  ", font=self.font_lg,
                   bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
-                  padx=16, pady=8,
-                  command=self.show_results
-                  ).pack(side="left", padx=8)
+                  padx=30, pady=14,
+                  command=self.show_home).place(relx=0.65, rely=0.88, anchor="center")
 
-        self._draw_sd_hints(self.container, {6: "CANCEL"})
+        tk.Frame(self.container, bg=ACCENT, height=6).pack(side="bottom", fill="x")
+        self._draw_sd_hints(self.container, {1: "SCAN", 6: "HOME"})
 
     def _try_rtsp_with_password(self, cam, password):
         """Try connecting to RTSP camera with manually entered password."""
