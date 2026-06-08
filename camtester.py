@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -505,8 +505,12 @@ class CamTesterApp(tk.Tk):
 
         elif self.current_screen == "manual_setup":
             if n == 1:
-                self.start_scan()
+                # Can't easily pass cam reference here — touchscreen only for browser
+                pass
+            elif n == 4:
+                self._close_browser_and_scan(None)
             elif n == 6:
+                self._close_browser_and_scan(None)
                 self.show_home()
 
         elif self.current_screen == "reboot":
@@ -1671,51 +1675,90 @@ class CamTesterApp(tk.Tk):
                 self.show_playback(cam)
 
     def show_password_entry(self, cam):
-        """Show manual setup required screen."""
+        """Show manual setup screen with option to launch browser."""
         self.current_screen = "manual_setup"
         self._stop_health_checks()
+        self._chromium_proc = None
         self.clear_container()
 
-        # Red top stripe
         tk.Frame(self.container, bg=ACCENT, height=6).pack(fill="x")
 
         centre = tk.Frame(self.container, bg=BG_DARK)
         centre.pack(fill="both", expand=True)
 
         tk.Label(centre, text="⚠  Manual Setup Required",
-                 font=self.font_xl, bg=BG_DARK, fg=WARNING).place(relx=0.5, rely=0.22, anchor="center")
+                 font=self.font_xl, bg=BG_DARK, fg=WARNING).place(relx=0.5, rely=0.18, anchor="center")
 
-        tk.Label(centre, text=f"Camera found at {cam['ip']} but password is unknown.",
-                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.36, anchor="center")
+        tk.Label(centre, text=f"Camera found at {cam['ip']} — password not set.",
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.30, anchor="center")
 
-        tk.Label(centre, text="Please complete initial camera setup via a web browser:",
-                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.46, anchor="center")
+        tk.Label(centre, text="Set the password to  Repair2023!  then tap Done.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.39, anchor="center")
 
-        # Instructions box
-        inst = tk.Frame(centre, bg=BG_CARD, padx=20, pady=12)
-        inst.place(relx=0.5, rely=0.62, anchor="center", width=700)
+        # Browser launch button
+        self._setup_status_var = tk.StringVar(value="")
+        tk.Label(centre, textvariable=self._setup_status_var,
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.52, anchor="center")
 
-        tk.Label(inst, text=f"1.  Connect a computer to this network",
-                 font=self.font_sm, bg=BG_CARD, fg=TEXT_PRIMARY, anchor="w").pack(fill="x")
-        tk.Label(inst, text=f"2.  Open  http://{cam['ip']}  in a browser",
-                 font=self.font_sm, bg=BG_CARD, fg=ACCENT, anchor="w").pack(fill="x", pady=2)
-        tk.Label(inst, text=f"3.  Set the password to:  Repair2023!",
-                 font=self.font_sm, bg=BG_CARD, fg=TEXT_PRIMARY, anchor="w").pack(fill="x")
-        tk.Label(inst, text=f"4.  Return here and scan again",
-                 font=self.font_sm, bg=BG_CARD, fg=TEXT_PRIMARY, anchor="w").pack(fill="x", pady=(2, 0))
+        btn_frame = tk.Frame(centre, bg=BG_DARK)
+        btn_frame.place(relx=0.5, rely=0.65, anchor="center")
 
-        tk.Button(centre, text="  SCAN AGAIN  ", font=self.font_lg,
-                  bg=ACCENT, fg=TEXT_PRIMARY, relief="flat",
-                  padx=30, pady=14,
-                  command=self.start_scan).place(relx=0.35, rely=0.88, anchor="center")
+        tk.Button(btn_frame, text="  OPEN BROWSER  ", font=self.font_lg,
+                  bg=ACCENT2, fg=TEXT_PRIMARY, relief="flat",
+                  padx=24, pady=14,
+                  command=lambda: self._launch_setup_browser(cam)
+                  ).pack(side="left", padx=12)
 
-        tk.Button(centre, text="  BACK  ", font=self.font_lg,
+        tk.Button(btn_frame, text="  DONE  ", font=self.font_lg,
+                  bg=SUCCESS, fg="#000000", relief="flat",
+                  padx=24, pady=14,
+                  command=lambda: self._close_browser_and_scan(cam)
+                  ).pack(side="left", padx=12)
+
+        tk.Button(btn_frame, text="  CANCEL  ", font=self.font_lg,
                   bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
-                  padx=30, pady=14,
-                  command=self.show_home).place(relx=0.65, rely=0.88, anchor="center")
+                  padx=24, pady=14,
+                  command=self.show_home
+                  ).pack(side="left", padx=12)
 
         tk.Frame(self.container, bg=ACCENT, height=6).pack(side="bottom", fill="x")
-        self._draw_sd_hints(self.container, {1: "SCAN", 6: "HOME"})
+        self._draw_sd_hints(self.container, {1: "BROWSER", 4: "DONE", 6: "CANCEL"})
+
+    def _launch_setup_browser(self, cam):
+        """Launch Chromium pointing to camera setup page."""
+        if hasattr(self, "_chromium_proc") and self._chromium_proc:
+            try:
+                self._chromium_proc.terminate()
+            except Exception:
+                pass
+        subprocess.run(["pkill", "chromium"], capture_output=True)
+        time.sleep(0.5)
+
+        self._setup_status_var.set(f"Opening browser to http://{cam['ip']}…")
+        try:
+            self._chromium_proc = subprocess.Popen([
+                "chromium",
+                "--window-size=1280,600",
+                "--window-position=0,65",
+                "--user-data-dir=/tmp/chromium-camtester",
+                "--disable-translate",
+                "--disable-infobars",
+                f"http://{cam['ip']}",
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._setup_status_var.set("✓  Browser open — set password to: Repair2023!")
+        except Exception as e:
+            self._setup_status_var.set(f"Could not open browser: {e}")
+
+    def _close_browser_and_scan(self, cam):
+        """Close browser and scan again."""
+        if hasattr(self, "_chromium_proc") and self._chromium_proc:
+            try:
+                self._chromium_proc.terminate()
+                self._chromium_proc = None
+            except Exception:
+                pass
+        subprocess.run(["pkill", "chromium"], capture_output=True)
+        self.start_scan()
 
     def _try_rtsp_with_password(self, cam, password):
         """Try connecting to RTSP camera with manually entered password."""
