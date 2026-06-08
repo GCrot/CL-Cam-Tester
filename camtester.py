@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.7"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1767,41 +1767,58 @@ class CamTesterApp(tk.Tk):
     def _autofill_password(self):
         """Use xdotool to auto-fill the password in the Chromium browser."""
         def _fill():
-            import time
-            # Give focus to Chromium
-            subprocess.run(
-                ["xdotool", "search", "--name", "Chromium", "windowfocus", "--sync"],
-                capture_output=True, timeout=5
-            )
             time.sleep(0.5)
+            try:
+                # Find Chromium window ID
+                result = subprocess.run(
+                    ["xdotool", "search", "--onlyvisible", "--class", "chromium"],
+                    capture_output=True, text=True, timeout=5
+                )
+                win_ids = result.stdout.strip().split()
+                if not win_ids:
+                    self.after(0, lambda: self._setup_status_var.set("⚠  Browser not found — open browser first"))
+                    return
 
-            # Tab to first password field and type password
-            subprocess.run(["xdotool", "key", "Tab"], capture_output=True)
-            time.sleep(0.2)
-            subprocess.run(
-                ["xdotool", "type", "--clearmodifiers", "Repair2023!"],
-                capture_output=True
-            )
-            time.sleep(0.2)
+                win_id = win_ids[-1]
 
-            # Tab to confirm password field and type again
-            subprocess.run(["xdotool", "key", "Tab"], capture_output=True)
-            time.sleep(0.2)
-            subprocess.run(
-                ["xdotool", "type", "--clearmodifiers", "Repair2023!"],
-                capture_output=True
-            )
-            time.sleep(0.2)
+                # Focus the window
+                subprocess.run(["xdotool", "windowfocus", "--sync", win_id],
+                               capture_output=True, timeout=3)
+                time.sleep(0.5)
 
-            # Tab to Apply button and press Enter
-            subprocess.run(["xdotool", "key", "Tab"], capture_output=True)
-            time.sleep(0.2)
-            subprocess.run(["xdotool", "key", "Return"], capture_output=True)
+                # Click on first password field using Tab from top of page
+                subprocess.run(["xdotool", "key", "--window", win_id, "Tab"],
+                               capture_output=True)
+                time.sleep(0.2)
+                subprocess.run(["xdotool", "type", "--window", win_id,
+                                "--clearmodifiers", "Repair2023!"],
+                               capture_output=True)
+                time.sleep(0.2)
 
-            self.after(0, lambda: self._setup_status_var.set("✓  Password submitted — click OK if prompted"))
+                # Tab to confirm field
+                subprocess.run(["xdotool", "key", "--window", win_id, "Tab"],
+                               capture_output=True)
+                time.sleep(0.2)
+                subprocess.run(["xdotool", "type", "--window", win_id,
+                                "--clearmodifiers", "Repair2023!"],
+                               capture_output=True)
+                time.sleep(0.2)
+
+                # Tab to Apply and press Enter
+                subprocess.run(["xdotool", "key", "--window", win_id, "Tab"],
+                               capture_output=True)
+                time.sleep(0.2)
+                subprocess.run(["xdotool", "key", "--window", win_id, "Return"],
+                               capture_output=True)
+
+                self.after(0, lambda: self._setup_status_var.set(
+                    "✓  Password submitted — confirm any dialog then press DONE"))
+
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._setup_status_var.set(f"⚠  Auto-fill error: {err}"))
 
         threading.Thread(target=_fill, daemon=True).start()
-        self._setup_status_var.set("Filling password…")
+        self._setup_status_var.set("Filling password in browser…")
         """Close browser, restore app window and scan again."""
         if hasattr(self, "_chromium_proc") and self._chromium_proc:
             try:
