@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.7"
+APP_VERSION = "1.2.8"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1769,47 +1769,56 @@ class CamTesterApp(tk.Tk):
         def _fill():
             time.sleep(0.5)
             try:
-                # Find Chromium window ID
+                # Use wmctrl to find and focus Chromium
                 result = subprocess.run(
-                    ["xdotool", "search", "--onlyvisible", "--class", "chromium"],
-                    capture_output=True, text=True, timeout=5
+                    ["wmctrl", "-l"],
+                    capture_output=True, text=True,
+                    env={**os.environ, "DISPLAY": ":0"}
                 )
-                win_ids = result.stdout.strip().split()
-                if not win_ids:
+                win_id = None
+                for line in result.stdout.splitlines():
+                    if "chromium" in line.lower() or "wisenet" in line.lower():
+                        win_id = line.split()[0]
+                        break
+
+                if not win_id:
                     self.after(0, lambda: self._setup_status_var.set("⚠  Browser not found — open browser first"))
                     return
 
-                win_id = win_ids[-1]
+                # Focus the Chromium window
+                subprocess.run(["wmctrl", "-ia", win_id],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
+                time.sleep(0.8)
 
-                # Focus the window
-                subprocess.run(["xdotool", "windowfocus", "--sync", win_id],
-                               capture_output=True, timeout=3)
-                time.sleep(0.5)
-
-                # Click on first password field using Tab from top of page
-                subprocess.run(["xdotool", "key", "--window", win_id, "Tab"],
-                               capture_output=True)
-                time.sleep(0.2)
-                subprocess.run(["xdotool", "type", "--window", win_id,
-                                "--clearmodifiers", "Repair2023!"],
-                               capture_output=True)
-                time.sleep(0.2)
+                # Tab to first password field
+                subprocess.run(["xdotool", "key", "Tab"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
+                time.sleep(0.3)
+                subprocess.run(["xdotool", "type", "--clearmodifiers", "Repair2023!"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
+                time.sleep(0.3)
 
                 # Tab to confirm field
-                subprocess.run(["xdotool", "key", "--window", win_id, "Tab"],
-                               capture_output=True)
-                time.sleep(0.2)
-                subprocess.run(["xdotool", "type", "--window", win_id,
-                                "--clearmodifiers", "Repair2023!"],
-                               capture_output=True)
-                time.sleep(0.2)
+                subprocess.run(["xdotool", "key", "Tab"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
+                time.sleep(0.3)
+                subprocess.run(["xdotool", "type", "--clearmodifiers", "Repair2023!"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
+                time.sleep(0.3)
 
                 # Tab to Apply and press Enter
-                subprocess.run(["xdotool", "key", "--window", win_id, "Tab"],
-                               capture_output=True)
+                subprocess.run(["xdotool", "key", "Tab"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
                 time.sleep(0.2)
-                subprocess.run(["xdotool", "key", "--window", win_id, "Return"],
-                               capture_output=True)
+                subprocess.run(["xdotool", "key", "Return"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
 
                 self.after(0, lambda: self._setup_status_var.set(
                     "✓  Password submitted — confirm any dialog then press DONE"))
