@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1736,21 +1736,29 @@ class CamTesterApp(tk.Tk):
 
         self._setup_status_var.set(f"Opening browser to http://{cam['ip']}…")
         try:
+            # Minimize our app so Chromium can be seen
+            self.attributes("-fullscreen", False)
+            self.iconify()
+            time.sleep(0.3)
+
             self._chromium_proc = subprocess.Popen([
                 "chromium",
-                "--window-size=1280,600",
-                "--window-position=0,65",
+                "--window-size=1280,720",
+                "--window-position=0,0",
                 "--user-data-dir=/tmp/chromium-camtester",
                 "--disable-translate",
                 "--disable-infobars",
+                "--start-maximized",
                 f"http://{cam['ip']}",
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self._setup_status_var.set("✓  Browser open — set password to: Repair2023!")
         except Exception as e:
+            self.deiconify()
+            self.attributes("-fullscreen", True)
             self._setup_status_var.set(f"Could not open browser: {e}")
 
     def _close_browser_and_scan(self, cam):
-        """Close browser and scan again."""
+        """Close browser, restore app window and scan again."""
         if hasattr(self, "_chromium_proc") and self._chromium_proc:
             try:
                 self._chromium_proc.terminate()
@@ -1758,6 +1766,10 @@ class CamTesterApp(tk.Tk):
             except Exception:
                 pass
         subprocess.run(["pkill", "chromium"], capture_output=True)
+        time.sleep(0.3)
+        # Restore fullscreen app
+        self.deiconify()
+        self.attributes("-fullscreen", True)
         self.start_scan()
 
     def _try_rtsp_with_password(self, cam, password):
