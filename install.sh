@@ -61,6 +61,7 @@ apt-get install -y -qq \
     ffmpeg \
     nmap \
     arping \
+    dnsmasq \
     avahi-utils \
     unclutter \
     xdotool \
@@ -81,7 +82,8 @@ pip3 install --break-system-packages \
     netifaces \
     pillow \
     numpy \
-    streamdeck 2>/dev/null || true
+    streamdeck \
+    wsdiscovery 2>/dev/null || true
 success "Python packages installed"
 
 # ─────────────────────────────────────────────
@@ -170,8 +172,18 @@ success "Auto-login configured"
 # ─────────────────────────────────────────────
 #  7. STATIC IP (192.168.100.1/24)
 # ─────────────────────────────────────────────
-info "Configuring network…"
-# Static IP for camera testing
+info "Configuring DHCP server for cameras (dnsmasq)…"
+cat > /etc/dnsmasq.d/camtester.conf << 'EOF'
+interface=eth0
+bind-interfaces
+dhcp-range=192.168.100.50,192.168.100.99,255.255.255.0,1h
+dhcp-option=3
+dhcp-option=6
+EOF
+systemctl enable dnsmasq
+systemctl restart dnsmasq
+success "dnsmasq configured (192.168.100.50-99 on eth0)"
+# Static IP for camera testing + link-local for cameras that default to DHCP
 nmcli connection delete eth0-static 2>/dev/null || true
 nmcli connection add \
   con-name "eth0-static" \
@@ -179,8 +191,10 @@ nmcli connection add \
   type ethernet \
   ipv4.method manual \
   ipv4.addresses "192.168.100.1/24" \
-  ipv4.routes "0.0.0.0/0" \
   connection.autoconnect yes 2>/dev/null || true
+
+# Add link-local separately (nmcli doesn't support multiple addresses in one command reliably)
+nmcli connection modify eth0-static +ipv4.addresses "169.254.1.1/16" 2>/dev/null || true
 
 # DHCP profile — used only for updates, autoconnect off
 nmcli connection delete eth0-dhcp 2>/dev/null || true

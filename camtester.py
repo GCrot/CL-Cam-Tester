@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -26,7 +26,9 @@ APP_VERSION = "1.1.1"
 SCAN_SUBNET      = "10.0.100"       # First 3 octets of your PoE network
 SCAN_TIMEOUT     = 10               # Seconds to wait for network scan
 RTSP_PORT        = 554
-RTSP_PATHS       = [                # Common RTSP stream paths to try
+RTSP_PATHS       = [                # Common RTSP stream paths to try — Hanwha first
+    "/profile2/media.smp",          # Hanwha H.264 30fps (preferred)
+    "/profile1/media.smp",          # Hanwha MJPEG fallback
     "/stream",
     "/live",
     "/live/ch0",
@@ -39,13 +41,15 @@ RTSP_PATHS       = [                # Common RTSP stream paths to try
     "/stream1",
 ]
 RTSP_CREDENTIALS = [                # username:password combos to try
-    ("", ""),
-    ("admin", ""),
+    ("admin", "Repair2023!"),       # Christie Lites shop default
+    ("admin", "4321"),              # Hanwha factory default
+    ("admin", ""),                  # Blank password
     ("admin", "admin"),
     ("admin", "12345"),
     ("admin", "123456"),
     ("root", "root"),
     ("user", "user"),
+    ("", ""),
 ]
 STREAM_DECK_DEVICE = "/dev/input/by-id/usb-Elgato_Stream_Deck_*"
 
@@ -1366,81 +1370,102 @@ class CamTesterApp(tk.Tk):
     # ── RTSP ─────────────────────────────────────────
     def _discover_rtsp(self):
         """
-        Discover RTSP cameras on the network.
-        Uses two strategies:
-        1. Subnet scan (nmap/tcp) — works when camera is on same subnet
-        2. ARP scan — finds cameras on ANY subnet when directly cabled
+        Discover RTSP cameras using ONVIF WS-Discovery first,
+        then fall back to subnet scan if nothing found.
         """
         results  = []
-        all_hosts = []  # list of (ip, port) tuples
+        all_hosts = []
 
-        own_ip = self.get_ip_address("eth0")
-        if not own_ip:
-            self._update_scan_ui(detail="No network interface — skipping RTSP scan")
-            return results
+        # ── Strategy 1: ONVIF WS-Discovery ───────────
+        # Works regardless of IP/subnet — cameras announce themselves
+        self._update_scan_ui(detail="Scanning for ONVIF cameras via WS-Discovery…")
+        onvif_ips = self._onvif_discover()
+        for ip in onvif_ips:
+            if not self.scanning:
+                break
+            all_hosts.append((ip, 554))
 
-        subnet = ".".join(own_ip.split(".")[:3])
+        if all_hosts:
+            self._update_scan_ui(detail=f"ONVIF found {len(all_hosts)} device(s) — probing streams…")
+        else:
+            # ── Strategy 2: Subnet scan fallback ─────
+            own_ip = self.get_ip_address("eth0")
+            if not own_ip:
+                self._update_scan_ui(detail="No network interface — skipping RTSP scan")
+                return results
 
-        # ── Strategy 1: Subnet scan ──────────────────
-        self._update_scan_ui(detail=f"Scanning {subnet}.0/24 for RTSP ports…")
-        for port in [554, 8554]:
-            try:
-                nmap_out = subprocess.run(
-                    ["nmap", "-p", str(port), "--open", "-oG", "-",
-                     f"{subnet}.0/24"],
-                    capture_output=True, text=True, timeout=SCAN_TIMEOUT
-                )
-                for line in nmap_out.stdout.splitlines():
-                    if f"{port}/open" in line:
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            all_hosts.append((parts[1], port))
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                all_hosts.extend(self._tcp_sweep(subnet, port))
-
-        # ── Strategy 2: ARP scan ─────────────────────
-        # Catches cameras on different subnets when directly cabled.
-        # Any device plugged into eth0 will appear in the ARP table
-        # after it sends any packet (e.g. a DHCP request or link-local).
-        self._update_scan_ui(detail="Checking ARP table for directly connected devices…")
-        arp_ips = self._arp_scan()
-
-        # For ARP-discovered IPs not already found by subnet scan
-        known_ips = {ip for ip, _ in all_hosts}
-        new_ips   = [ip for ip in arp_ips if ip not in known_ips]
-
-        if new_ips:
-            self._update_scan_ui(detail=f"ARP found {len(new_ips)} extra device(s) — adding routes…")
-            for ip in new_ips:
-                if not self.scanning:
-                    break
-                # Add a host route so the Pi can reach this IP
-                # even if it's on a different subnet
-                self._add_host_route(ip)
-                for port in [554, 8554]:
-                    all_hosts.append((ip, port))
+            subnet = ".".join(own_ip.split(".")[:3])
+            self._update_scan_ui(detail=f"Scanning {subnet}.0/24 for RTSP ports…")
+            for port in [554, 8554]:
+                try:
+                    nmap_out = subprocess.run(
+                        ["nmap", "-p", str(port), "--open", "-oG", "-",
+                         f"{subnet}.0/24"],
+                        capture_output=True, text=True, timeout=SCAN_TIMEOUT
+                    )
+                    for line in nmap_out.stdout.splitlines():
+                        if f"{port}/open" in line:
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                all_hosts.append((parts[1], port))
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    all_hosts.extend(self._tcp_sweep(subnet, port))
 
         if not all_hosts:
             return results
 
-        # Deduplicate by IP — prefer 554 over 8554
+        # Deduplicate by IP
         seen = {}
         for ip, port in all_hosts:
             if ip not in seen:
                 seen[ip] = port
         hosts = list(seen.items())
 
-        self._update_scan_ui(detail=f"Found {len(hosts)} host(s) — probing streams…")
         for ip, port in hosts:
             if not self.scanning:
                 break
             self._update_scan_ui(detail=f"Probing {ip}:{port}…")
+            # Ensure Pi can reach this IP
+            self._add_host_route(ip)
             cam = self._probe_rtsp_camera(ip, port)
             if cam:
                 results.append(cam)
-                break   # Stop after first valid RTSP camera found
+                break
 
         return results
+
+    def _onvif_discover(self, timeout=6):
+        """
+        Use ONVIF WS-Discovery to find cameras on eth0 regardless of subnet.
+        Returns list of IP addresses.
+        """
+        ips = []
+        try:
+            from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
+            wsd = WSDiscovery()
+            wsd.start()
+            time.sleep(timeout)
+            services = wsd.searchServices()
+            for s in services:
+                types = str(s.getTypes())
+                # Only ONVIF cameras — skip Windows/printers
+                if 'onvif' not in types.lower() and 'networkvideotransmitter' not in types.lower():
+                    continue
+                for addr in s.getXAddrs():
+                    # Extract IP from URL like http://192.168.100.55/onvif/device_service
+                    import re
+                    match = re.search(r'http://(\d+\.\d+\.\d+\.\d+)', addr)
+                    if match:
+                        ip = match.group(1)
+                        if ip not in ips:
+                            ips.append(ip)
+                            print(f"ONVIF discovered: {ip}")
+            wsd.stop()
+        except ImportError:
+            print("wsdiscovery not installed — skipping ONVIF discovery")
+        except Exception as e:
+            print(f"ONVIF discovery error: {e}")
+        return ips
 
     def _arp_scan(self):
         """
@@ -1588,7 +1613,18 @@ class CamTesterApp(tk.Tk):
                         "codec":      info.get("codec", ""),
                         "resolution": info.get("resolution", ""),
                     }
-        return None
+
+        # All credentials failed — return partial result so user can enter password
+        return {
+            "type":          "RTSP",
+            "name":          f"RTSP @ {ip}",
+            "ip":            ip,
+            "url":           "",
+            "codec":         "",
+            "resolution":    "",
+            "needs_password": True,
+            "port":          port,
+        }
 
     def _ffprobe_stream(self, url):
         """Run ffprobe on an RTSP URL. Returns dict with codec/resolution or None."""
@@ -1623,7 +1659,134 @@ class CamTesterApp(tk.Tk):
     def connect_camera(self, index):
         if 0 <= index < len(self.found_cameras):
             cam = self.found_cameras[index]
-            self.show_playback(cam)
+            if cam.get("needs_password"):
+                self.show_password_entry(cam)
+            else:
+                self.show_playback(cam)
+
+    def show_password_entry(self, cam):
+        """Show on-screen keyboard for RTSP password entry."""
+        self.current_screen = "password_entry"
+        self._stop_health_checks()
+        self.clear_container()
+
+        # Header
+        header = tk.Frame(self.container, bg=ACCENT, height=52)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        tk.Frame(header, bg=ACCENT_LIGHT, width=6).pack(side="left", fill="y")
+        tk.Label(header, text="  Enter Camera Password",
+                 font=self.font_md, bg=ACCENT, fg=TEXT_PRIMARY).pack(side="left", padx=10)
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        tk.Label(centre, text=f"Camera: {cam['name']}",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).pack(pady=(20, 5))
+        tk.Label(centre, text="Username: admin",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).pack()
+
+        # Password display
+        self._pwd_var = tk.StringVar(value="")
+        pwd_frame = tk.Frame(centre, bg=BG_CARD, padx=10, pady=8)
+        pwd_frame.pack(pady=15, padx=40, fill="x")
+        tk.Label(pwd_frame, text="Password:", font=self.font_sm,
+                 bg=BG_CARD, fg=TEXT_DIM).pack(side="left")
+        self._pwd_display = tk.Label(pwd_frame, textvariable=self._pwd_var,
+                                      font=self.font_md, bg=BG_CARD,
+                                      fg=TEXT_PRIMARY, width=20, anchor="w")
+        self._pwd_display.pack(side="left", padx=10)
+
+        # On-screen keyboard
+        kb_frame = tk.Frame(centre, bg=BG_DARK)
+        kb_frame.pack(pady=5)
+
+        rows = [
+            "1234567890",
+            "qwertyuiop",
+            "asdfghjkl",
+            "zxcvbnm!@#",
+            "ZXCVBNM$%^",
+            "&*()-_+=.,"
+        ]
+
+        for row in rows:
+            rf = tk.Frame(kb_frame, bg=BG_DARK)
+            rf.pack()
+            for ch in row:
+                tk.Button(rf, text=ch, font=self.font_sm,
+                          bg=BG_CARD2, fg=TEXT_PRIMARY,
+                          relief="flat", width=3, pady=4,
+                          command=lambda c=ch: self._pwd_var.set(self._pwd_var.get() + c)
+                          ).pack(side="left", padx=1, pady=1)
+
+        # Action buttons
+        btn_frame = tk.Frame(centre, bg=BG_DARK)
+        btn_frame.pack(pady=10)
+
+        tk.Button(btn_frame, text="⌫ DEL", font=self.font_sm,
+                  bg=BG_CARD2, fg=WARNING, relief="flat",
+                  padx=16, pady=8,
+                  command=lambda: self._pwd_var.set(self._pwd_var.get()[:-1])
+                  ).pack(side="left", padx=8)
+
+        tk.Button(btn_frame, text="CLEAR", font=self.font_sm,
+                  bg=BG_CARD2, fg=WARNING, relief="flat",
+                  padx=16, pady=8,
+                  command=lambda: self._pwd_var.set("")
+                  ).pack(side="left", padx=8)
+
+        tk.Button(btn_frame, text="CONNECT", font=self.font_sm,
+                  bg=SUCCESS, fg="#000000", relief="flat",
+                  padx=20, pady=8,
+                  command=lambda: self._try_rtsp_with_password(cam, self._pwd_var.get())
+                  ).pack(side="left", padx=8)
+
+        tk.Button(btn_frame, text="CANCEL", font=self.font_sm,
+                  bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
+                  padx=16, pady=8,
+                  command=self.show_results
+                  ).pack(side="left", padx=8)
+
+        self._draw_sd_hints(self.container, {6: "CANCEL"})
+
+    def _try_rtsp_with_password(self, cam, password):
+        """Try connecting to RTSP camera with manually entered password."""
+        self.current_screen = "probing"
+        self.clear_container()
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        status_var = tk.StringVar(value="Trying password…")
+        tk.Label(centre, text="Connecting", font=self.font_xl,
+                 bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.35, anchor="center")
+        tk.Label(centre, textvariable=status_var,
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.50, anchor="center")
+
+        ip   = cam.get("ip", "")
+        port = cam.get("port", 554)
+
+        def _probe():
+            for path in RTSP_PATHS:
+                if password:
+                    url = f"rtsp://admin:{password}@{ip}:{port}{path}"
+                else:
+                    url = f"rtsp://{ip}:{port}{path}"
+                self.after(0, lambda u=url: status_var.set(f"Trying {path}…"))
+                info = self._ffprobe_stream(url)
+                if info:
+                    cam["url"]        = url
+                    cam["codec"]      = info.get("codec", "")
+                    cam["resolution"] = info.get("resolution", "")
+                    cam.pop("needs_password", None)
+                    self.after(0, lambda: self.show_playback(cam))
+                    return
+
+            self.after(0, lambda: status_var.set("⚠  Wrong password or stream not found"))
+            self.after(2000, lambda: self.show_password_entry(cam))
+
+        threading.Thread(target=_probe, daemon=True).start()
 
     # ─────────────────────────────────────────
     #  CAMERA HEALTH CHECKING
