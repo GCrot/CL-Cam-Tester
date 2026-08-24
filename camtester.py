@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.8"
+APP_VERSION = "1.3.9"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2238,32 +2238,69 @@ class CamTesterApp(tk.Tk):
                     print(f"Route add error: {e}")
                 time.sleep(1)
 
-                # Step 4 — Wait for camera to come back online at default IP
+                # Step 4 — Wait for camera to come back online.
+                # After reset the AIDA camera may either use its default IP (192.168.1.188)
+                # OR grab a DHCP lease from our dnsmasq (192.168.100.x). Check both.
                 _update("Waiting for camera to reboot…", "This may take 30–60 seconds")
-                default_url = f"http://{default_ip}/cgi-bin/web.fcgi?func=set"
                 online = False
-                for attempt in range(60):
-                    time.sleep(2)
-                    _update(f"Waiting for camera… ({attempt * 2}s)", "")
+                found_ip = None
+                key2 = 0
+
+                def _try_login(test_ip):
+                    """Try to log in at a given IP. Returns key or None."""
                     try:
+                        u = f"http://{test_ip}/cgi-bin/web.fcgi?func=set"
                         test_req = urllib.request.Request(
-                            default_url,
+                            u,
                             data=jsonlib.dumps({"key": 0, "system": {"login": "admin:admin"}}).encode(),
                             headers=headers, method="POST"
                         )
                         with urllib.request.urlopen(test_req, timeout=3) as r:
                             test_data = jsonlib.loads(r.read())
                             if test_data.get("status"):
-                                key2 = test_data["system"]["login"]
-                                online = True
-                                break
+                                return test_data["system"]["login"]
                     except Exception:
                         pass
+                    return None
+
+                for attempt in range(60):
+                    time.sleep(2)
+                    _update(f"Waiting for camera… ({attempt * 2}s)", "")
+
+                    # Check default IP first
+                    k = _try_login(default_ip)
+                    if k is not None:
+                        found_ip = default_ip
+                        key2 = k
+                        online = True
+                        break
+
+                    # Check dnsmasq leases for a camera that grabbed DHCP
+                    try:
+                        with open("/var/lib/misc/dnsmasq.leases") as lf:
+                            for line in lf:
+                                parts = line.split()
+                                if len(parts) >= 4:
+                                    lease_ip = parts[2]
+                                    # Try logging in at this leased IP
+                                    k = _try_login(lease_ip)
+                                    if k is not None:
+                                        found_ip = lease_ip
+                                        key2 = k
+                                        online = True
+                                        break
+                    except Exception:
+                        pass
+                    if online:
+                        break
 
                 if not online:
                     _update("⚠  Camera did not come back online")
                     self.after(3000, self.show_home)
                     return
+
+                default_ip  = found_ip
+                default_url = f"http://{found_ip}/cgi-bin/web.fcgi?func=set"
 
                 # Step 5 — Push recommended config
                 _update("Camera online — applying settings…")
