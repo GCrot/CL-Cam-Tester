@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1899,6 +1899,8 @@ class CamTesterApp(tk.Tk):
 
         threading.Thread(target=_fill, daemon=True).start()
         self._setup_status_var.set("Filling password in browser…")
+
+    def _close_browser_and_scan(self, cam):
         """Close browser, restore app window and scan again."""
         if hasattr(self, "_chromium_proc") and self._chromium_proc:
             try:
