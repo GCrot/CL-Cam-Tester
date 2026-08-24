@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.3.5"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2123,19 +2123,22 @@ class CamTesterApp(tk.Tk):
             for user, pwd in RTSP_CREDENTIALS:
                 try:
                     pw_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-                    pw_mgr.add_password(None, f"http://{ip}/", user, pwd)
-                    handler = urllib.request.HTTPDigestAuthHandler(pw_mgr)
-                    opener = urllib.request.build_opener(handler)
-                    req = urllib.request.Request(reset_url)
-                    resp = opener.open(req, timeout=5)
-                    if resp.status in (200, 204):
+                    # Register for the full base URL so digest realm matching works
+                    pw_mgr.add_password(None, f"http://{ip}/stw-cgi/", user, pwd)
+                    digest_handler = urllib.request.HTTPDigestAuthHandler(pw_mgr)
+                    basic_handler  = urllib.request.HTTPBasicAuthHandler(pw_mgr)
+                    opener = urllib.request.build_opener(digest_handler, basic_handler)
+
+                    resp = opener.open(reset_url, timeout=6)
+                    code = resp.getcode()
+                    if code in (200, 204):
                         success = True
                         break
                 except urllib.error.HTTPError as e:
-                    # 401 = wrong credential, keep trying; others may still mean success
                     if e.code in (200, 204):
                         success = True
                         break
+                    # 401 = wrong password, try next credential
                     continue
                 except Exception:
                     continue
@@ -2144,8 +2147,7 @@ class CamTesterApp(tk.Tk):
                 _update("✓  Factory reset sent — camera is rebooting")
                 self.after(0, self._show_reset_success)
             else:
-                # Reset via authenticated API failed — camera may need web setup
-                _update("⚠  Could not reset — camera may need initial setup")
+                _update("⚠  Could not reset — check camera password")
                 self.after(3500, self.show_home)
 
         threading.Thread(target=_reset, daemon=True).start()
