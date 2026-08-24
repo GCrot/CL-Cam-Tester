@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1605,34 +1605,61 @@ class CamTesterApp(tk.Tk):
         return hosts
 
     def _probe_rtsp_camera(self, ip, port=554):
-        """Try known credentials only. If none work, flag for manual setup."""
-        # Quick TCP check first — don't waste time if port isn't open
-        if not self._port_open(ip, port):
-            print(f"Port {port} not open on {ip}")
-            return None
+        """
+        Probe RTSP camera using fast DESCRIBE first (no credentials needed).
+        200 = open stream, 401 = auth required, None = not an RTSP camera.
+        Only uses ffprobe to get codec/resolution after successful auth.
+        """
+        # Try each path with DESCRIBE first to find the right path
+        found_path = None
+        needs_auth = False
 
+        for path in RTSP_PATHS:
+            if not self.scanning:
+                return None
+            status = self._rtsp_describe(ip, port, path)
+            if status == 200:
+                found_path = path
+                needs_auth = False
+                break
+            elif status == 401:
+                found_path = path
+                needs_auth = True
+                break
+
+        if found_path is None:
+            return None  # Not an RTSP camera
+
+        if not needs_auth:
+            # Open stream — no credentials needed
+            url = f"rtsp://{ip}:{port}{found_path}"
+            info = self._ffprobe_stream(url) or {}
+            return {
+                "type":       "RTSP",
+                "name":       f"RTSP @ {ip}",
+                "ip":         ip,
+                "url":        url,
+                "codec":      info.get("codec", ""),
+                "resolution": info.get("resolution", ""),
+            }
+
+        # Needs auth — try known credentials
         for user, pwd in RTSP_CREDENTIALS:
-            for path in RTSP_PATHS:
-                if not self.scanning:
-                    return None
-                if user:
-                    url = f"rtsp://{user}:{pwd}@{ip}:{port}{path}"
-                else:
-                    url = f"rtsp://{ip}:{port}{path}"
+            if not self.scanning:
+                return None
+            url = f"rtsp://{user}:{pwd}@{ip}:{port}{found_path}"
+            info = self._ffprobe_stream(url)
+            if info:
+                return {
+                    "type":       "RTSP",
+                    "name":       f"RTSP @ {ip}",
+                    "ip":         ip,
+                    "url":        url,
+                    "codec":      info.get("codec", ""),
+                    "resolution": info.get("resolution", ""),
+                }
 
-                info = self._ffprobe_stream(url)
-                if info:
-                    name = f"RTSP @ {ip}"
-                    return {
-                        "type":       "RTSP",
-                        "name":       name,
-                        "ip":         ip,
-                        "url":        url,
-                        "codec":      info.get("codec", ""),
-                        "resolution": info.get("resolution", ""),
-                    }
-
-        # Known credentials failed — manual setup required
+        # Known credentials failed — needs manual setup
         return {
             "type":           "RTSP",
             "name":           f"RTSP @ {ip}",
@@ -1681,6 +1708,33 @@ class CamTesterApp(tk.Tk):
             return result == 0
         except Exception:
             return False
+
+    def _rtsp_describe(self, ip, port=554, path="/profile2/media.smp", timeout=2.0):
+        """
+        Send a raw RTSP DESCRIBE without credentials.
+        Returns HTTP status code (200=open, 401=auth required, None=no response).
+        Much faster than ffprobe for discovery — same approach as RoboViewer.
+        """
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            s.connect((ip, port))
+            request = (
+                f"DESCRIBE rtsp://{ip}{path} RTSP/1.0\r\n"
+                f"CSeq: 1\r\n"
+                f"Accept: application/sdp\r\n"
+                f"User-Agent: CL-CamTester\r\n\r\n"
+            )
+            s.send(request.encode())
+            response = s.recv(1024).decode(errors="ignore")
+            s.close()
+            import re
+            m = re.search(r"RTSP/1\.0 (\d{3})", response)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            pass
+        return None
 
     # ─────────────────────────────────────────
     #  CONNECT TO CAMERA
