@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.7"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2115,19 +2115,18 @@ class CamTesterApp(tk.Tk):
             # Use curl with digest auth — confirmed working approach
             _update("Sending factory reset command…")
             reset_url = (f"http://{ip}/stw-cgi/system.cgi"
-                         f"?msubmenu=factorydefault&action=control&mode=All")
+                         f"?msubmenu=factoryreset&action=control")
 
             success = False
             for user, pwd in RTSP_CREDENTIALS:
                 try:
                     result = subprocess.run(
-                        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                         "--digest", "-u", f"{user}:{pwd}",
+                        ["curl", "-s", "--digest", "-u", f"{user}:{pwd}",
                          "--max-time", "6", reset_url],
                         capture_output=True, text=True, timeout=8
                     )
-                    code = result.stdout.strip()
-                    if code in ("200", "204"):
+                    # Camera returns "OK" on success, "NG"/error on failure
+                    if "OK" in result.stdout and "Error" not in result.stdout:
                         success = True
                         break
                 except Exception:
