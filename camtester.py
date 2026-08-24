@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.9"
+APP_VERSION = "1.4.0"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2299,7 +2299,7 @@ class CamTesterApp(tk.Tk):
                     self.after(3000, self.show_home)
                     return
 
-                default_ip  = found_ip
+                cam_ip      = found_ip
                 default_url = f"http://{found_ip}/cgi-bin/web.fcgi?func=set"
 
                 # Step 5 — Push recommended config
