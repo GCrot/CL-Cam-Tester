@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2361,12 +2361,20 @@ class CamTesterApp(tk.Tk):
                 with open(self.APP_PATH, "rb") as f:
                     current = f.read()
 
-                if hashlib.md5(latest).hexdigest() == hashlib.md5(current).hexdigest():
-                    self.after(0, lambda: self.update_status_var.set("✓  You are on the latest version"))
+                # Compare by version string — more reliable than MD5
+                import re
+                latest_ver  = re.search(rb'APP_VERSION\s*=\s*"([^"]+)"', latest)
+                current_ver = re.search(rb'APP_VERSION\s*=\s*"([^"]+)"', current)
+                latest_ver  = latest_ver.group(1).decode()  if latest_ver  else "0"
+                current_ver = current_ver.group(1).decode() if current_ver else "0"
+
+                if latest_ver == current_ver:
+                    self.after(0, lambda: self.update_status_var.set(f"✓  Already on latest version ({current_ver})"))
                     self.after(0, self._show_update_back_btn)
                 else:
                     self._pending_update_bytes = latest
-                    self.after(0, lambda: self.update_status_var.set("Update available — ready to install"))
+                    self.after(0, lambda lv=latest_ver, cv=current_ver: self.update_status_var.set(
+                        f"Update available: v{cv} → v{lv}"))
                     self.after(0, lambda l=latest: self._show_update_install_btn(l))
 
             except Exception as e:
