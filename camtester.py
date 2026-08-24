@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.8"
+APP_VERSION = "1.2.9"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -41,6 +41,7 @@ RTSP_PATHS       = [                # Common RTSP stream paths to try — Hanwha
     "/stream1",
 ]
 RTSP_CREDENTIALS = [                # username:password combos to try
+    ("admin", "RoboSpot10"),        # Robe RoboSpot factory default
     ("admin", "Repair2023!"),       # Christie Lites shop default
     ("admin", "4321"),              # Hanwha factory default
     ("admin", ""),                  # Blank password
