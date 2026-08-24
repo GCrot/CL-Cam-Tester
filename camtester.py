@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.3"
+APP_VERSION = "1.3.4"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -945,8 +945,8 @@ class CamTesterApp(tk.Tk):
         )
         stop_btn.pack(side="right", padx=8)
 
-        # Factory reset button — only for AIDA NDI cameras
-        if cam["type"] == "NDI":
+        # Factory reset button — available for NDI and RTSP cameras
+        if cam["type"] in ("NDI", "RTSP"):
             self.reset_btn = tk.Button(
                 bar, text="  FACTORY RESET  ",
                 font=self.font_sm, bg=BG_CARD2, fg=WARNING,
@@ -1891,8 +1891,14 @@ class CamTesterApp(tk.Tk):
                                capture_output=True,
                                env={**os.environ, "DISPLAY": ":0"})
 
+                # Wait for the confirmation popup, then press Enter to confirm
+                time.sleep(3.0)
+                subprocess.run(["xdotool", "key", "Return"],
+                               capture_output=True,
+                               env={**os.environ, "DISPLAY": ":0"})
+
                 self.after(0, lambda: self._setup_status_var.set(
-                    "✓  Password submitted — confirm any dialog then press DONE"))
+                    "✓  Password set — press DONE to continue"))
 
             except Exception as e:
                 self.after(0, lambda err=str(e): self._setup_status_var.set(f"⚠  Auto-fill error: {err}"))
@@ -2080,6 +2086,71 @@ class CamTesterApp(tk.Tk):
         self._draw_sd_hints(self.container, {1: "RESET", 6: "CANCEL"})
 
     def _do_factory_reset(self, cam):
+        """Route factory reset based on camera type."""
+        if cam.get("type") == "RTSP":
+            self._do_rtsp_factory_reset(cam)
+        else:
+            self._do_ndi_factory_reset(cam)
+
+    def _do_rtsp_factory_reset(self, cam):
+        """Factory reset a Hanwha RTSP camera via CGI API. No config push."""
+        self.current_screen = "resetting"
+        self.clear_container()
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        self.reset_status_var = tk.StringVar(value="Connecting to camera…")
+        tk.Label(centre, text="Factory Reset", font=self.font_xl,
+                 bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.30, anchor="center")
+        tk.Label(centre, textvariable=self.reset_status_var,
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.45, anchor="center")
+
+        ip = cam.get("ip", "")
+
+        def _update(msg):
+            self.after(0, lambda m=msg: self.reset_status_var.set(m))
+
+        def _reset():
+            import urllib.request
+
+            # Try each known credential for the reset command
+            _update("Sending factory reset command…")
+            reset_url = (f"http://{ip}/stw-cgi/system.cgi"
+                         f"?msubmenu=factorydefault&action=control&mode=All")
+
+            success = False
+            for user, pwd in RTSP_CREDENTIALS:
+                try:
+                    pw_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+                    pw_mgr.add_password(None, f"http://{ip}/", user, pwd)
+                    handler = urllib.request.HTTPDigestAuthHandler(pw_mgr)
+                    opener = urllib.request.build_opener(handler)
+                    req = urllib.request.Request(reset_url)
+                    resp = opener.open(req, timeout=5)
+                    if resp.status in (200, 204):
+                        success = True
+                        break
+                except urllib.error.HTTPError as e:
+                    # 401 = wrong credential, keep trying; others may still mean success
+                    if e.code in (200, 204):
+                        success = True
+                        break
+                    continue
+                except Exception:
+                    continue
+
+            if success:
+                _update("✓  Factory reset sent — camera is rebooting")
+                self.after(0, self._show_reset_success)
+            else:
+                # Reset via authenticated API failed — camera may need web setup
+                _update("⚠  Could not reset — camera may need initial setup")
+                self.after(3500, self.show_home)
+
+        threading.Thread(target=_reset, daemon=True).start()
+
+    def _do_ndi_factory_reset(self, cam):
         """Send factory reset, wait for reboot, then push recommended config."""
         self.current_screen = "resetting"
         self.clear_container()
