@@ -47,6 +47,12 @@ ssh pi@camtester.local
 
 ### Step 3 — Install
 
+First cache your sudo credentials so the background install isn't interrupted by a password prompt:
+
+```bash
+sudo -v
+```
+
 Download and run the installer detached, so it survives any brief network drop during setup:
 
 ```bash
@@ -67,6 +73,16 @@ sudo reboot
 ```
 
 The app starts automatically on the touchscreen.
+
+> **If the install fails partway** (e.g. corrupted apt cache from an interrupted run), clean up and restart:
+> ```bash
+> sudo pkill -f install.sh
+> sudo rm -rf /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
+> sudo apt-get clean && sudo apt-get update
+> sudo -v
+> sudo nohup bash /tmp/install.sh > /tmp/install.log 2>&1 &
+> tail -f /tmp/install.log
+> ```
 
 ---
 
