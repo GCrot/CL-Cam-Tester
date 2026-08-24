@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.6"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2112,9 +2112,7 @@ class CamTesterApp(tk.Tk):
             self.after(0, lambda m=msg: self.reset_status_var.set(m))
 
         def _reset():
-            import urllib.request
-
-            # Try each known credential for the reset command
+            # Use curl with digest auth — confirmed working approach
             _update("Sending factory reset command…")
             reset_url = (f"http://{ip}/stw-cgi/system.cgi"
                          f"?msubmenu=factorydefault&action=control&mode=All")
@@ -2122,24 +2120,16 @@ class CamTesterApp(tk.Tk):
             success = False
             for user, pwd in RTSP_CREDENTIALS:
                 try:
-                    pw_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-                    # Register for the full base URL so digest realm matching works
-                    pw_mgr.add_password(None, f"http://{ip}/stw-cgi/", user, pwd)
-                    digest_handler = urllib.request.HTTPDigestAuthHandler(pw_mgr)
-                    basic_handler  = urllib.request.HTTPBasicAuthHandler(pw_mgr)
-                    opener = urllib.request.build_opener(digest_handler, basic_handler)
-
-                    resp = opener.open(reset_url, timeout=6)
-                    code = resp.getcode()
-                    if code in (200, 204):
+                    result = subprocess.run(
+                        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                         "--digest", "-u", f"{user}:{pwd}",
+                         "--max-time", "6", reset_url],
+                        capture_output=True, text=True, timeout=8
+                    )
+                    code = result.stdout.strip()
+                    if code in ("200", "204"):
                         success = True
                         break
-                except urllib.error.HTTPError as e:
-                    if e.code in (200, 204):
-                        success = True
-                        break
-                    # 401 = wrong password, try next credential
-                    continue
                 except Exception:
                     continue
 
