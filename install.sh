@@ -65,6 +65,8 @@ apt-get install -y -qq \
     avahi-utils \
     unclutter \
     xdotool \
+    wmctrl \
+    chromium \
     git \
     curl \
     wget \
