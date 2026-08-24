@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.2.9"
+APP_VERSION = "1.3.0"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1606,6 +1606,11 @@ class CamTesterApp(tk.Tk):
 
     def _probe_rtsp_camera(self, ip, port=554):
         """Try known credentials only. If none work, flag for manual setup."""
+        # Quick TCP check first — don't waste time if port isn't open
+        if not self._port_open(ip, port):
+            print(f"Port {port} not open on {ip}")
+            return None
+
         for user, pwd in RTSP_CREDENTIALS:
             for path in RTSP_PATHS:
                 if not self.scanning:
@@ -1648,10 +1653,10 @@ class CamTesterApp(tk.Tk):
                     "-print_format", "json",
                     "-show_streams",
                     "-rtsp_transport", "tcp",
-                    "-timeout", "3000000",   # 3s in microseconds
+                    "-timeout", "2000000",   # 2s in microseconds
                     url
                 ],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=4
             )
             data = json.loads(out.stdout)
             for stream in data.get("streams", []):
@@ -1665,6 +1670,17 @@ class CamTesterApp(tk.Tk):
         except Exception:
             pass
         return None
+
+    def _port_open(self, ip, port, timeout=1.5):
+        """Quick TCP check to see if port is open before trying ffprobe."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            result = s.connect_ex((ip, port))
+            s.close()
+            return result == 0
+        except Exception:
+            return False
 
     # ─────────────────────────────────────────
     #  CONNECT TO CAMERA
