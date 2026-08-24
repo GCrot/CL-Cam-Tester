@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.3.7"
+APP_VERSION = "1.3.8"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1450,9 +1450,15 @@ class CamTesterApp(tk.Tk):
     def _onvif_discover(self, timeout=6):
         """
         Use ONVIF WS-Discovery to find cameras on eth0 regardless of subnet.
+        Filters out anything on the WiFi subnet — cameras live only on eth0.
         Returns list of IP addresses.
         """
         ips = []
+
+        # Get WiFi subnet so we can exclude it (cameras are never on WiFi)
+        wlan_ip = self.get_ip_address("wlan0")
+        wlan_subnet = ".".join(wlan_ip.split(".")[:2]) if wlan_ip else None
+
         try:
             from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
             wsd = WSDiscovery()
@@ -1470,6 +1476,10 @@ class CamTesterApp(tk.Tk):
                     match = re.search(r'http://(\d+\.\d+\.\d+\.\d+)', addr)
                     if match:
                         ip = match.group(1)
+                        # Skip anything on the WiFi subnet — cameras are on eth0 only
+                        if wlan_subnet and ip.startswith(wlan_subnet + "."):
+                            print(f"Skipping WiFi-side device: {ip}")
+                            continue
                         if ip not in ips:
                             ips.append(ip)
                             print(f"ONVIF discovered: {ip}")
