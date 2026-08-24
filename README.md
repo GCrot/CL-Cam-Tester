@@ -47,13 +47,20 @@ ssh pi@camtester.local
 
 ### Step 3 — Install
 
-Run the one-line installer:
+Download and run the installer detached, so it survives any brief network drop during setup:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main/install.sh -o /tmp/install.sh
+sudo nohup bash /tmp/install.sh > /tmp/install.log 2>&1 &
 ```
 
-This takes 10–15 minutes (it installs Chromium and other packages). When complete, reboot:
+Watch progress with:
+
+```bash
+tail -f /tmp/install.log
+```
+
+The install takes 10–15 minutes. When you see the completion banner in the log, press Ctrl+C to stop watching, then reboot:
 
 ```bash
 sudo reboot

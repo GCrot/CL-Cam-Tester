@@ -200,8 +200,9 @@ nmcli connection add \
   connection.autoconnect no 2>/dev/null || true
 
 # Bring up the static connection now so dnsmasq can bind to it
-nmcli connection up eth0-static 2>/dev/null || true
-sleep 2
+# eth0-static has never-default set, so this won't affect WiFi/SSH
+(sleep 1; nmcli connection up eth0-static 2>/dev/null) &
+sleep 3
 
 success "Network configured (static: 192.168.100.1/24)"
 
