@@ -174,17 +174,7 @@ success "Auto-login configured"
 # ─────────────────────────────────────────────
 #  7. STATIC IP (192.168.100.1/24)
 # ─────────────────────────────────────────────
-info "Configuring DHCP server for cameras (dnsmasq)…"
-cat > /etc/dnsmasq.d/camtester.conf << 'EOF'
-interface=eth0
-bind-interfaces
-dhcp-range=192.168.100.50,192.168.100.99,255.255.255.0,1h
-dhcp-option=3
-dhcp-option=6
-EOF
-systemctl enable dnsmasq
-systemctl restart dnsmasq
-success "dnsmasq configured (192.168.100.50-99 on eth0)"
+info "Configuring network…"
 # Static IP for camera testing + link-local for cameras that default to DHCP
 nmcli connection delete eth0-static 2>/dev/null || true
 nmcli connection add \
@@ -209,7 +199,25 @@ nmcli connection add \
   ipv4.dhcp-timeout 15 \
   connection.autoconnect no 2>/dev/null || true
 
+# Bring up the static connection now so dnsmasq can bind to it
+nmcli connection up eth0-static 2>/dev/null || true
+sleep 2
+
 success "Network configured (static: 192.168.100.1/24)"
+
+# ─────────────────────────────────────────────
+# dnsmasq must be configured AFTER eth0 has its static IP
+info "Configuring DHCP server for cameras (dnsmasq)…"
+cat > /etc/dnsmasq.d/camtester.conf << 'EOF'
+interface=eth0
+bind-interfaces
+dhcp-range=192.168.100.50,192.168.100.99,255.255.255.0,1h
+dhcp-option=3
+dhcp-option=6
+EOF
+systemctl enable dnsmasq
+systemctl restart dnsmasq || true
+success "dnsmasq configured (192.168.100.50-99 on eth0)"
 
 # ─────────────────────────────────────────────
 #  ETH MANAGER SERVICE
