@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1386,6 +1386,24 @@ class CamTesterApp(tk.Tk):
         self.after(0, self.show_results)
 
     # ── NDI ───────────────────────────────────────────
+    def _ndi_source_alive(self, ip, url_addr, timeout=1.0):
+        """Quick TCP check to the NDI source port to filter stale mDNS cache entries."""
+        # Parse port from url_address (e.g. "10.0.0.1:5961"), default to 5960
+        port = 5960
+        if ":" in url_addr:
+            try:
+                port = int(url_addr.split(":")[1])
+            except (ValueError, IndexError):
+                port = 5960
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            result = s.connect_ex((ip, port))
+            s.close()
+            return result == 0
+        except Exception:
+            return False
+
     def _discover_ndi(self):
         """Discover NDI sources directly via ndi-python."""
         results = []
@@ -1415,6 +1433,13 @@ class CamTesterApp(tk.Tk):
                 ndi_name = s.ndi_name  or ""
                 url_addr = s.url_address or ""
                 ip = url_addr.split(":")[0] if ":" in url_addr else url_addr
+
+                # Verify the source is actually reachable — the mDNS cache keeps
+                # advertising unplugged cameras for up to a minute. A quick TCP
+                # check to the NDI port (5960/5961) filters out stale entries.
+                if ip and not self._ndi_source_alive(ip, url_addr):
+                    print(f"Skipping stale NDI source: {ndi_name} ({ip})")
+                    continue
 
                 # Add matching subnet IP in background so discovery isn't delayed
                 if ip:
