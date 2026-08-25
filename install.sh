@@ -4,15 +4,38 @@
 #  Raspberry Pi 5 + Touch Display 2 (5") + Stream Deck Mini
 #
 #  Usage (fresh Raspberry Pi OS Lite 64-bit):
-#    curl -sSL https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main/install.sh | sudo bash
+#    sudo -v
+#    curl -sSL https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main/install.sh -o /tmp/install.sh
+#    sudo bash /tmp/install.sh
 #
-#  Or clone and run locally:
-#    git clone https://github.com/GCrot/CL-Cam-Tester.git
-#    cd CL-Cam-Tester
-#    sudo bash install.sh
+#  The script re-launches itself fully detached via systemd-run so it
+#  survives SSH disconnects (which happen when eth0 is reconfigured).
+#  Watch progress on the touchscreen or with:  journalctl -u cl-installer -f
 # ─────────────────────────────────────────────────────────────────────────────
 
-set -e
+# Re-exec detached under systemd so an SSH drop can't kill the install.
+# The CLINSTALL_DETACHED guard prevents infinite recursion.
+if [ -z "$CLINSTALL_DETACHED" ] && [ "$1" != "--run" ]; then
+    if [ "$EUID" -ne 0 ]; then
+        echo "Please run as root:  sudo bash $0"
+        exit 1
+    fi
+    # Copy self to a stable path
+    cp "$0" /usr/local/bin/cl-install-detached.sh 2>/dev/null || \
+        cat "$0" > /usr/local/bin/cl-install-detached.sh
+    chmod +x /usr/local/bin/cl-install-detached.sh
+    echo ""
+    echo "  Starting detached install — this survives SSH disconnects."
+    echo "  Watch progress on the touchscreen, or run:"
+    echo "      journalctl -u cl-installer -f"
+    echo ""
+    systemd-run --unit=cl-installer --setenv=CLINSTALL_DETACHED=1 \
+        /usr/local/bin/cl-install-detached.sh --run
+    echo "  Install started as service 'cl-installer'."
+    echo "  When it finishes (you'll see the completion banner on the touchscreen),"
+    echo "  reboot with:  sudo reboot"
+    exit 0
+fi
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -20,15 +43,26 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 info()    { echo -e "${CYAN}[INFO]${NC}  $1"; echo "[INFO]  $1" > /dev/tty1 2>/dev/null || true; }
 success() { echo -e "${GREEN}[OK]${NC}    $1"; echo "[OK]    $1" > /dev/tty1 2>/dev/null || true; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
-error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+error()   { echo -e "${RED}[ERROR]${NC} $1" > /dev/tty1 2>/dev/null; echo -e "${RED}[ERROR]${NC} $1"; }
+
+# NOTE: no 'set -e' — a single failed command (e.g. a network blip when eth0
+# comes up) must not abort the whole install and leave files half-written.
 
 # ── Must be root ─────────────────────────────────────────────────────────────
-[ "$EUID" -ne 0 ] && error "Please run as root: sudo bash install.sh"
+[ "$EUID" -ne 0 ] && error "Please run as root: sudo bash install.sh" && exit 1
 
+# When detached via systemd-run there's no SUDO_USER — default to pi
 REAL_USER=${SUDO_USER:-pi}
+[ "$REAL_USER" = "root" ] && REAL_USER=pi
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 APP_DIR="$REAL_HOME/camtester"
 REPO_URL="https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main"
+
+# Add apt cache recovery — a prior interrupted run can corrupt the cache
+apt-get update -qq 2>/dev/null || {
+    rm -rf /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
+    apt-get clean
+}
 
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -321,11 +355,24 @@ success "Boot optimised"
 info "Downloading CL-Cam-Tester…"
 mkdir -p "$APP_DIR"
 
-curl -sSL "$REPO_URL/camtester.py" -o "$APP_DIR/camtester.py"
-curl -sSL "$REPO_URL/config.json"  -o "$APP_DIR/config.json"
+# Download with retry + size check — an empty file means the app won't start
+for attempt in 1 2 3; do
+    curl -sSL "$REPO_URL/camtester.py" -o "$APP_DIR/camtester.py"
+    if [ -s "$APP_DIR/camtester.py" ]; then
+        break
+    fi
+    warn "camtester.py download attempt $attempt failed — retrying"
+    sleep 2
+done
+
+curl -sSL "$REPO_URL/config.json" -o "$APP_DIR/config.json"
+
+if [ ! -s "$APP_DIR/camtester.py" ]; then
+    error "Failed to download camtester.py — check internet connection"
+fi
 
 chown -R "$REAL_USER:$REAL_USER" "$APP_DIR"
-success "App downloaded to $APP_DIR"
+success "App downloaded to $APP_DIR ($(wc -c < "$APP_DIR/camtester.py") bytes)"
 
 # ─────────────────────────────────────────────
 #  12. NDI-FIND WRAPPER
@@ -372,6 +419,17 @@ echo "  App:      $APP_DIR/camtester.py"
 echo "  Config:   $APP_DIR/config.json"
 echo "  Static IP: 192.168.100.1/24"
 echo ""
-echo -e "${YELLOW}  Reboot to start the app:${NC}"
-echo "  sudo reboot"
-echo ""
+
+# Show completion on the touchscreen too
+{
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  INSTALLATION COMPLETE"
+    echo "  Rebooting in 10 seconds…"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+} > /dev/tty1 2>/dev/null || true
+
+echo -e "${YELLOW}  Rebooting in 10 seconds to start the app…${NC}"
+echo "  (running detached, so the reboot completes on its own)"
+sleep 10
+reboot

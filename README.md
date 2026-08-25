@@ -47,41 +47,28 @@ ssh pi@camtester.local
 
 ### Step 3 — Install
 
-First cache your sudo credentials so the background install isn't interrupted by a password prompt:
+Cache your sudo credentials, download the installer, and run it:
 
 ```bash
 sudo -v
-```
-
-Download and run the installer detached, so it survives any brief network drop during setup:
-
-```bash
 curl -sSL https://raw.githubusercontent.com/GCrot/CL-Cam-Tester/main/install.sh -o /tmp/install.sh
-sudo nohup bash /tmp/install.sh > /tmp/install.log 2>&1 &
+sudo bash /tmp/install.sh
 ```
 
-Watch progress with:
+The installer relaunches itself as a detached background service, so it **keeps running even if your SSH session drops** (which happens when the ethernet port is reconfigured). 
+
+Watch progress on the **touchscreen** — each step prints there. You can also follow along over SSH with:
 
 ```bash
-tail -f /tmp/install.log
+journalctl -u cl-installer -f
 ```
 
-The install takes 10–15 minutes. When you see the completion banner in the log, press Ctrl+C to stop watching, then reboot:
+The install takes 10–15 minutes. When it finishes it shows a completion banner on the touchscreen and **reboots automatically**. After reboot the app starts on its own.
 
-```bash
-sudo reboot
-```
-
-The app starts automatically on the touchscreen.
-
-> **If the install fails partway** (e.g. corrupted apt cache from an interrupted run), clean up and restart:
+> **If the install fails partway** (e.g. corrupted apt cache from an interrupted run), just run it again — it recovers the cache and re-runs safely:
 > ```bash
-> sudo pkill -f install.sh
-> sudo rm -rf /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
-> sudo apt-get clean && sudo apt-get update
 > sudo -v
-> sudo nohup bash /tmp/install.sh > /tmp/install.log 2>&1 &
-> tail -f /tmp/install.log
+> sudo bash /tmp/install.sh
 > ```
 
 ---
