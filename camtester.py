@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1588,8 +1588,6 @@ class CamTesterApp(tk.Tk):
 
         except Exception as e:
             print(f"_add_host_route error: {e}")
-
-        return results
 
     def _tcp_sweep(self, subnet, port=554):
         """Fallback: TCP connect sweep for given port across /24."""

@@ -29,13 +29,19 @@ if [ -z "$CLINSTALL_DETACHED" ] && [ "$1" != "--run" ]; then
     echo "  Watch progress on the touchscreen, or run:"
     echo "      journalctl -u cl-installer -f"
     echo ""
-    systemd-run --unit=cl-installer --setenv=CLINSTALL_DETACHED=1 \
+    systemd-run --unit=cl-installer \
+        --setenv=CLINSTALL_DETACHED=1 \
+        --setenv=DEBIAN_FRONTEND=noninteractive \
+        --property=TimeoutStartSec=3600 \
+        --property=Type=oneshot \
         /usr/local/bin/cl-install-detached.sh --run
     echo "  Install started as service 'cl-installer'."
-    echo "  When it finishes (you'll see the completion banner on the touchscreen),"
-    echo "  reboot with:  sudo reboot"
+    echo "  When it finishes, the Pi reboots automatically."
     exit 0
 fi
+
+# Ensure apt never prompts interactively in the detached context
+export DEBIAN_FRONTEND=noninteractive
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
