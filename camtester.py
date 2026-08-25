@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.5"
+APP_VERSION = "1.4.6"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -2277,18 +2277,33 @@ class CamTesterApp(tk.Tk):
             self._do_ndi_factory_reset(cam)
 
     def _do_rtsp_factory_reset(self, cam):
-        """Factory reset a Hanwha RTSP camera via CGI API. No config push."""
+        """Factory reset a Hanwha RTSP camera, then wait for it to reboot."""
         self.current_screen = "resetting"
         self.clear_container()
+
+        # Red warning stripes top and bottom
+        tk.Frame(self.container, bg=ACCENT, height=6).pack(fill="x")
 
         centre = tk.Frame(self.container, bg=BG_DARK)
         centre.pack(fill="both", expand=True)
 
-        self.reset_status_var = tk.StringVar(value="Connecting to camera…")
         tk.Label(centre, text="Factory Reset", font=self.font_xl,
-                 bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.30, anchor="center")
+                 bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.22, anchor="center")
+
+        self.reset_status_var = tk.StringVar(value="Sending factory reset command…")
         tk.Label(centre, textvariable=self.reset_status_var,
-                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.45, anchor="center")
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.40, anchor="center")
+
+        # Prominent do-not-unplug warning
+        tk.Label(centre, text="⚠  DO NOT UNPLUG THE CAMERA",
+                 font=self.font_lg, bg=BG_DARK, fg=WARNING).place(relx=0.5, rely=0.58, anchor="center")
+        tk.Label(centre, text="Removing power during reset can damage the camera.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.68, anchor="center")
+
+        tk.Frame(self.container, bg=ACCENT, height=6).pack(side="bottom", fill="x")
+
+        # No SD buttons during reset — nothing should be pressed
+        self._draw_sd_hints(self.container, {})
 
         ip = cam.get("ip", "")
 
@@ -2296,11 +2311,10 @@ class CamTesterApp(tk.Tk):
             self.after(0, lambda m=msg: self.reset_status_var.set(m))
 
         def _reset():
-            # Use curl with digest auth — confirmed working approach
-            _update("Sending factory reset command…")
             reset_url = (f"http://{ip}/stw-cgi/system.cgi"
                          f"?msubmenu=factoryreset&action=control")
 
+            # Find the working credential and send reset
             success = False
             for user, pwd in RTSP_CREDENTIALS:
                 try:
@@ -2309,19 +2323,40 @@ class CamTesterApp(tk.Tk):
                          "--max-time", "6", reset_url],
                         capture_output=True, text=True, timeout=8
                     )
-                    # Camera returns "OK" on success, "NG"/error on failure
                     if "OK" in result.stdout and "Error" not in result.stdout:
                         success = True
                         break
                 except Exception:
                     continue
 
-            if success:
-                _update("✓  Factory reset sent — camera is rebooting")
-                self.after(0, self._show_reset_success)
-            else:
+            if not success:
                 _update("⚠  Could not reset — check camera password")
                 self.after(3500, self.show_home)
+                return
+
+            # Wait for the camera to actually go down then come back up.
+            # This keeps the "do not unplug" screen visible through the whole reboot.
+            _update("Reset in progress — camera rebooting…")
+
+            # Phase 1: wait for camera to go offline (confirms reset started)
+            went_down = False
+            for _ in range(30):  # up to 30s
+                time.sleep(1)
+                if not self._port_open(ip, 554, timeout=1):
+                    went_down = True
+                    break
+
+            # Phase 2: wait for it to come back online
+            if went_down:
+                for i in range(90):  # up to 90s
+                    time.sleep(2)
+                    _update(f"Camera rebooting… ({i * 2}s)")
+                    if self._port_open(ip, 80, timeout=1) or self._port_open(ip, 554, timeout=1):
+                        time.sleep(3)  # give services a moment to fully start
+                        break
+
+            _update("✓  Factory reset complete")
+            self.after(800, self._show_reset_success)
 
         threading.Thread(target=_reset, daemon=True).start()
 
