@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.6"
+APP_VERSION = "1.4.7"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -1259,8 +1259,18 @@ class CamTesterApp(tk.Tk):
             "--keep-open=yes",
             "--idle=yes",
             "--rtsp-transport=tcp",
+            # ── Low-latency tuning ──
+            "--profile=low-latency",     # mpv's built-in low-latency profile
             "--cache=no",
             "--demuxer-readahead-secs=0",
+            "--demuxer-lavf-o=fflags=+nobuffer",  # don't buffer in the demuxer
+            "--demuxer-lavf-probesize=32",        # minimal probe before playing
+            "--demuxer-lavf-analyzeduration=0",   # don't analyze ahead
+            "--video-sync=audio",
+            "--framedrop=vo",                     # drop late frames instead of queueing
+            "--vd-lavc-threads=1",                # single-thread decode = lower latency
+            "--no-audio",                         # camera testing — no audio needed
+            "--untimed",                          # display frames as soon as decoded
             url,
         ]
         try:
