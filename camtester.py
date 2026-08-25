@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -565,8 +565,8 @@ class CamTesterApp(tk.Tk):
                     self.deiconify()
                     self.show_results()
             elif state == "done":
-                if n == 1:      # Done → rescan
-                    self._close_browser_and_scan(self._setup_cam)
+                if n == 1:      # Done → connect directly
+                    self._connect_after_setup(self._setup_cam)
                 elif n == 6:    # Cancel → back to results
                     self.show_results()
 
@@ -2033,7 +2033,7 @@ class CamTesterApp(tk.Tk):
         tk.Button(btn_frame, text="  DONE  ", font=self.font_lg,
                   bg=SUCCESS, fg="#000000", relief="flat",
                   padx=30, pady=14,
-                  command=lambda: self._close_browser_and_scan(cam)
+                  command=lambda: self._connect_after_setup(cam)
                   ).pack(side="left", padx=16)
 
         tk.Button(btn_frame, text="  CANCEL  ", font=self.font_lg,
@@ -2044,6 +2044,51 @@ class CamTesterApp(tk.Tk):
 
         tk.Frame(self.container, bg=SUCCESS, height=6).pack(side="bottom", fill="x")
         self._draw_sd_hints(self.container, {1: "DONE", 6: "CANCEL"})
+
+    def _connect_after_setup(self, cam):
+        """After password setup, connect directly to the known camera — no full rescan."""
+        # Close browser and restore app
+        if hasattr(self, "_chromium_proc") and self._chromium_proc:
+            try:
+                self._chromium_proc.terminate()
+                self._chromium_proc = None
+            except Exception:
+                pass
+        subprocess.run(["pkill", "chromium"], capture_output=True)
+        time.sleep(0.3)
+        self.deiconify()
+
+        ip   = cam.get("ip", "")
+        port = cam.get("port", 554)
+
+        self.current_screen = "probing"
+        self.clear_container()
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+        status_var = tk.StringVar(value="Connecting to camera…")
+        tk.Label(centre, text="Connecting", font=self.font_xl,
+                 bg=BG_DARK, fg=ACCENT).place(relx=0.5, rely=0.35, anchor="center")
+        tk.Label(centre, textvariable=status_var,
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.50, anchor="center")
+
+        def _probe():
+            # Password is now Repair2023! — find the working stream path
+            for path in RTSP_PATHS:
+                url = f"rtsp://admin:Repair2023!@{ip}:{port}{path}"
+                self.after(0, lambda p=path: status_var.set(f"Trying {p}…"))
+                info = self._ffprobe_stream(url)
+                if info:
+                    cam["url"]        = url
+                    cam["codec"]      = info.get("codec", "")
+                    cam["resolution"] = info.get("resolution", "")
+                    cam.pop("needs_password", None)
+                    self.after(0, lambda: self.show_playback(cam))
+                    return
+            # Couldn't connect — fall back to results
+            self.after(0, lambda: status_var.set("⚠  Could not connect — returning to results"))
+            self.after(2500, self.show_results)
+
+        threading.Thread(target=_probe, daemon=True).start()
 
     def _close_browser_and_scan(self, cam):
         """Close browser, restore app window and scan again."""
