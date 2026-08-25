@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -178,6 +178,51 @@ class VISCAZoomController:
                 except Exception:
                     pass
                 self._sock = None
+
+
+# ─────────────────────────────────────────────
+#  HANWHA ZOOM CONTROLLER (RTSP cameras)
+# ─────────────────────────────────────────────
+class HanwhaZoomController:
+    """
+    Controls zoom on Hanwha/Wisenet RTSP cameras via the ptzcontrol.cgi API.
+    Uses continuous zoom — send speed to start, send 0 to stop.
+    Mirrors the VISCAZoomController interface so playback code is the same.
+    """
+    def __init__(self, ip, user, pwd, zoom_update_cb=None):
+        self.ip             = ip
+        self.user           = user
+        self.pwd            = pwd
+        self.zoom_update_cb = zoom_update_cb   # not used — Hanwha gives no zoom position
+        self._zooming       = False
+
+    def _send(self, zoom_val):
+        url = (f"http://{self.ip}/stw-cgi/ptzcontrol.cgi"
+               f"?msubmenu=continuous&action=control&Channel=0"
+               f"&NormalizedSpeed=True&Zoom={zoom_val}")
+        try:
+            subprocess.run(
+                ["curl", "-s", "--digest", "-u", f"{self.user}:{self.pwd}",
+                 "--max-time", "3", url],
+                capture_output=True, timeout=4
+            )
+        except Exception as e:
+            print(f"Hanwha zoom error: {e}")
+
+    def start_zoom(self, direction):
+        """direction: 'tele' (in) or 'wide' (out)."""
+        if self._zooming:
+            return
+        self._zooming = True
+        speed = 50 if direction == "tele" else -50
+        threading.Thread(target=lambda: self._send(speed), daemon=True).start()
+
+    def stop_zoom(self):
+        self._zooming = False
+        threading.Thread(target=lambda: self._send(0), daemon=True).start()
+
+    def close(self):
+        self.stop_zoom()
 
 
 # ─────────────────────────────────────────────
@@ -962,7 +1007,7 @@ class CamTesterApp(tk.Tk):
         self.video_frame = tk.Frame(self.container, bg="#000000")
         self.video_frame.pack(fill="both", expand=True)
 
-        # Zoom overlay — bottom left, only for NDI cameras with VISCA
+        # Zoom overlay — NDI (VISCA, with position) and RTSP (Hanwha, no position)
         if cam["type"] == "NDI":
             zoom_bar = tk.Frame(self.container, bg="#0a0a0a", height=44)
             zoom_bar.pack(fill="x", side="bottom")
@@ -985,24 +1030,43 @@ class CamTesterApp(tk.Tk):
             tk.Label(zoom_bar, textvariable=self.zoom_pct_var,
                      font=self.font_xs, bg="#0a0a0a",
                      fg=TEXT_PRIMARY, width=5).pack(side="left")
+        elif cam["type"] == "RTSP":
+            zoom_bar = tk.Frame(self.container, bg="#0a0a0a", height=44)
+            zoom_bar.pack(fill="x", side="bottom")
+            zoom_bar.pack_propagate(False)
+            tk.Label(zoom_bar, text="ZOOM  —  hold B1 to zoom in, B4 to zoom out",
+                     font=self.font_xs, bg="#0a0a0a", fg=TEXT_DIM).pack(side="left", padx=12)
 
         self.update_idletasks()
 
         self._current_cam = cam
         wid = self.video_frame.winfo_id()
 
-        # Initialise VISCA zoom controller for NDI cameras — delayed so NDI connects first
+        # Initialise the right zoom controller for the camera type
         if cam["type"] == "NDI":
             self._zoom_controller = VISCAZoomController(
                 cam.get("ip", ""),
                 zoom_update_cb=self._update_zoom_display,
                 connect_delay=3.0
             )
+        elif cam["type"] == "RTSP":
+            # Extract credentials from the working RTSP URL
+            import re
+            user, pwd = "admin", "Repair2023!"
+            m = re.search(r'rtsp://([^:]+):([^@]*)@', cam.get("url", ""))
+            if m:
+                user, pwd = m.group(1), m.group(2)
+            self._zoom_controller = HanwhaZoomController(
+                cam.get("ip", ""), user, pwd
+            )
         else:
             self._zoom_controller = None
 
         self._launch_stream(cam)
-        self._draw_sd_hints(self.container, {1: "ZOOM +", 4: "ZOOM -", 5: "RESET", 6: "STOP"})
+        if cam["type"] in ("NDI", "RTSP"):
+            self._draw_sd_hints(self.container, {1: "ZOOM +", 4: "ZOOM -", 5: "RESET", 6: "STOP"})
+        else:
+            self._draw_sd_hints(self.container, {5: "RESET", 6: "STOP"})
 
     def _update_zoom_display(self, position, max_pos=1024):
         """Update the zoom level bar and percentage label."""
