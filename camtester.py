@@ -18,7 +18,7 @@ import sys
 import netifaces
 from PIL import Image, ImageDraw, ImageFont
 
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.4.4"
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION — edit these to match your setup
@@ -550,16 +550,25 @@ class CamTesterApp(tk.Tk):
                 self.show_home()
 
         elif self.current_screen == "manual_setup":
-            if n == 1:
-                if hasattr(self, "_setup_cam"):
-                    self._launch_setup_browser(self._setup_cam)
-            elif n == 2:
-                self._autofill_password()
-            elif n == 4:
-                self._close_browser_and_scan(None)
-            elif n == 6:
-                subprocess.run(["pkill", "chromium"], capture_output=True)
-                self.show_home()
+            state = getattr(self, "_setup_state", "initial")
+            if state == "initial":
+                if n == 1:      # Browser
+                    if hasattr(self, "_setup_cam"):
+                        self._launch_setup_browser(self._setup_cam)
+                elif n == 6:    # Cancel → back to results
+                    self.show_results()
+            elif state == "browser":
+                if n == 2:      # Auto-fill
+                    self._autofill_password()
+                elif n == 6:    # Cancel → back to results
+                    subprocess.run(["pkill", "chromium"], capture_output=True)
+                    self.deiconify()
+                    self.show_results()
+            elif state == "done":
+                if n == 1:      # Done → rescan
+                    self._close_browser_and_scan(self._setup_cam)
+                elif n == 6:    # Cancel → back to results
+                    self.show_results()
 
         elif self.current_screen == "reboot":
             if n == 1:
@@ -1845,9 +1854,10 @@ class CamTesterApp(tk.Tk):
                 self.show_playback(cam)
 
     def show_password_entry(self, cam):
-        """Show manual setup screen with option to launch browser."""
+        """Manual setup wizard — state 1: Open Browser or Cancel."""
         self.current_screen = "manual_setup"
-        self._setup_cam = cam  # Store for SD button access
+        self._setup_cam = cam
+        self._setup_state = "initial"
         self._stop_health_checks()
         self._chromium_proc = None
         self.clear_container()
@@ -1858,51 +1868,38 @@ class CamTesterApp(tk.Tk):
         centre.pack(fill="both", expand=True)
 
         tk.Label(centre, text="⚠  Manual Setup Required",
-                 font=self.font_xl, bg=BG_DARK, fg=WARNING).place(relx=0.5, rely=0.18, anchor="center")
+                 font=self.font_xl, bg=BG_DARK, fg=WARNING).place(relx=0.5, rely=0.22, anchor="center")
 
         tk.Label(centre, text=f"Camera found at {cam['ip']} — password not set.",
-                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.30, anchor="center")
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.36, anchor="center")
 
-        tk.Label(centre, text="Set the password to  Repair2023!  then tap Done.",
-                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.39, anchor="center")
+        tk.Label(centre, text="Press Open Browser to begin initial camera setup.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.46, anchor="center")
 
-        # Browser launch button
         self._setup_status_var = tk.StringVar(value="")
         tk.Label(centre, textvariable=self._setup_status_var,
-                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.52, anchor="center")
+                 font=self.font_sm, bg=BG_DARK, fg=SUCCESS).place(relx=0.5, rely=0.56, anchor="center")
 
         btn_frame = tk.Frame(centre, bg=BG_DARK)
-        btn_frame.place(relx=0.5, rely=0.58, anchor="center")
+        btn_frame.place(relx=0.5, rely=0.70, anchor="center")
 
         tk.Button(btn_frame, text="  OPEN BROWSER  ", font=self.font_lg,
                   bg=ACCENT2, fg=TEXT_PRIMARY, relief="flat",
-                  padx=24, pady=14,
+                  padx=30, pady=14,
                   command=lambda: self._launch_setup_browser(cam)
-                  ).pack(side="left", padx=12)
-
-        tk.Button(btn_frame, text="  AUTO-FILL PASSWORD  ", font=self.font_lg,
-                  bg=WARNING, fg="#000000", relief="flat",
-                  padx=24, pady=14,
-                  command=lambda: self._autofill_password()
-                  ).pack(side="left", padx=12)
-
-        tk.Button(btn_frame, text="  DONE  ", font=self.font_lg,
-                  bg=SUCCESS, fg="#000000", relief="flat",
-                  padx=24, pady=14,
-                  command=lambda: self._close_browser_and_scan(cam)
-                  ).pack(side="left", padx=12)
+                  ).pack(side="left", padx=16)
 
         tk.Button(btn_frame, text="  CANCEL  ", font=self.font_lg,
                   bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
-                  padx=24, pady=14,
-                  command=self.show_home
-                  ).pack(side="left", padx=12)
+                  padx=30, pady=14,
+                  command=self.show_results
+                  ).pack(side="left", padx=16)
 
         tk.Frame(self.container, bg=ACCENT, height=6).pack(side="bottom", fill="x")
-        self._draw_sd_hints(self.container, {1: "BROWSER", 2: "AUTO-FILL", 4: "DONE", 6: "CANCEL"})
+        self._draw_sd_hints(self.container, {1: "BROWSER", 6: "CANCEL"})
 
     def _launch_setup_browser(self, cam):
-        """Launch Chromium pointing to camera setup page."""
+        """Launch Chromium — state 2: Auto-fill or Cancel (SD only, app hidden)."""
         if hasattr(self, "_chromium_proc") and self._chromium_proc:
             try:
                 self._chromium_proc.terminate()
@@ -1911,7 +1908,10 @@ class CamTesterApp(tk.Tk):
         subprocess.run(["pkill", "chromium"], capture_output=True)
         time.sleep(0.5)
 
-        self._setup_status_var.set(f"Opening browser to http://{cam['ip']}…")
+        self._setup_state = "browser"
+        # Update SD buttons — app is about to hide, deck is the only control
+        self._draw_sd_hints(self.container, {2: "AUTO-FILL", 6: "CANCEL"})
+
         try:
             # Hide our app so Chromium can be seen
             self.withdraw()
@@ -1927,7 +1927,6 @@ class CamTesterApp(tk.Tk):
                 "--start-maximized",
                 f"http://{cam['ip']}",
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self._setup_status_var.set("✓  Browser open — set password to: Repair2023!")
         except Exception as e:
             self.deiconify()
             self._setup_status_var.set(f"Could not open browser: {e}")
@@ -1994,14 +1993,57 @@ class CamTesterApp(tk.Tk):
                                capture_output=True,
                                env={**os.environ, "DISPLAY": ":0"})
 
-                self.after(0, lambda: self._setup_status_var.set(
-                    "✓  Password set — press DONE to continue"))
+                time.sleep(1.0)
+                # Auto-fill done — restore the app and move to state 3 (Done/Cancel)
+                self.after(0, self._show_setup_done_state)
 
             except Exception as e:
                 self.after(0, lambda err=str(e): self._setup_status_var.set(f"⚠  Auto-fill error: {err}"))
 
         threading.Thread(target=_fill, daemon=True).start()
-        self._setup_status_var.set("Filling password in browser…")
+
+    def _show_setup_done_state(self):
+        """Manual setup wizard — state 3: password set, Done or Cancel."""
+        subprocess.run(["pkill", "chromium"], capture_output=True)
+        if hasattr(self, "_chromium_proc"):
+            self._chromium_proc = None
+        self.deiconify()
+        self._setup_state = "done"
+
+        cam = self._setup_cam
+        self.clear_container()
+
+        tk.Frame(self.container, bg=SUCCESS, height=6).pack(fill="x")
+
+        centre = tk.Frame(self.container, bg=BG_DARK)
+        centre.pack(fill="both", expand=True)
+
+        tk.Label(centre, text="✓  Password Set",
+                 font=self.font_xl, bg=BG_DARK, fg=SUCCESS).place(relx=0.5, rely=0.28, anchor="center")
+
+        tk.Label(centre, text="The camera password has been set to  Repair2023!",
+                 font=self.font_md, bg=BG_DARK, fg=TEXT_PRIMARY).place(relx=0.5, rely=0.42, anchor="center")
+
+        tk.Label(centre, text="Press Done to reconnect to the camera.",
+                 font=self.font_sm, bg=BG_DARK, fg=TEXT_DIM).place(relx=0.5, rely=0.52, anchor="center")
+
+        btn_frame = tk.Frame(centre, bg=BG_DARK)
+        btn_frame.place(relx=0.5, rely=0.68, anchor="center")
+
+        tk.Button(btn_frame, text="  DONE  ", font=self.font_lg,
+                  bg=SUCCESS, fg="#000000", relief="flat",
+                  padx=30, pady=14,
+                  command=lambda: self._close_browser_and_scan(cam)
+                  ).pack(side="left", padx=16)
+
+        tk.Button(btn_frame, text="  CANCEL  ", font=self.font_lg,
+                  bg=BG_CARD2, fg=TEXT_PRIMARY, relief="flat",
+                  padx=30, pady=14,
+                  command=self.show_results
+                  ).pack(side="left", padx=16)
+
+        tk.Frame(self.container, bg=SUCCESS, height=6).pack(side="bottom", fill="x")
+        self._draw_sd_hints(self.container, {1: "DONE", 6: "CANCEL"})
 
     def _close_browser_and_scan(self, cam):
         """Close browser, restore app window and scan again."""
